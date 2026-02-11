@@ -1,0 +1,42 @@
+.DS_Store
+.idea
+
+.venv/
+.env
+
+# Logs
+*.log
+
+# Python
+__pycache__/
+*.pyc
+
+# Tool Caches
+.ruff_cache/
+.pytest_cache/
+.mypy_cache/
+.coverage
+htmlcov/
+
+# Distribution / Build
+build/
+dist/
+*.egg-info/
+
+data_volume/
+experiments/
+
+# Dagster
+.tmp_*
+
+# AI Coding assistants
+.gemini/
+.claude/
+
+# Chainlit
+.chainlit/
+
+# GitHub
+.github
+.files
+legacy_scripts/
