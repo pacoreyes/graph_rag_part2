@@ -5,6 +5,9 @@ def test_configuration_defaults():
     cfg = Configuration()
     assert cfg.model == "gemini-1.5-flash"
     assert cfg.retrieval_k == 5
+    assert cfg.community_level == 2
+    assert cfg.neighborhood_depth == 1
+    assert cfg.similarity_threshold == 0.5
 
 
 def test_configuration_custom_values():
@@ -45,3 +48,25 @@ def test_configuration_is_frozen():
         assert False, "Should have raised FrozenInstanceError"
     except AttributeError:
         pass
+
+
+def test_configuration_community_level():
+    cfg = Configuration(community_level=3)
+    assert cfg.community_level == 3
+
+
+def test_configuration_neighborhood_depth():
+    cfg = Configuration(neighborhood_depth=2)
+    assert cfg.neighborhood_depth == 2
+
+
+def test_configuration_similarity_threshold():
+    cfg = Configuration(similarity_threshold=0.7)
+    assert cfg.similarity_threshold == 0.7
+
+
+def test_from_runnable_config_with_new_fields():
+    config = {"configurable": {"community_level": 4, "similarity_threshold": 0.8}}
+    cfg = Configuration.from_runnable_config(config)
+    assert cfg.community_level == 4
+    assert cfg.similarity_threshold == 0.8

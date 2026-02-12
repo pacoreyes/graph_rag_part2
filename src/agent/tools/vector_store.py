@@ -11,6 +11,7 @@ def vector_search(
     client: Pinecone,
     index_name: str,
     top_k: int = 5,
+    filter_dict: dict | None = None,
 ) -> dict:
     """Search a Pinecone vector index.
 
@@ -19,9 +20,13 @@ def vector_search(
         client: Pinecone client instance (injected).
         index_name: Name of the Pinecone index to query.
         top_k: Number of top results to return.
+        filter_dict: Optional metadata filter for the query.
 
     Returns:
         dict: Pinecone query response with matches and metadata.
     """
     index = client.Index(index_name)
-    return index.query(vector=query_vector, top_k=top_k, include_metadata=True)
+    kwargs: dict = dict(vector=query_vector, top_k=top_k, include_metadata=True)
+    if filter_dict is not None:
+        kwargs["filter"] = filter_dict
+    return index.query(**kwargs)

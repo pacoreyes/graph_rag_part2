@@ -7,6 +7,7 @@ injected dependencies.
 
 from agent.infrastructure.gemini_client import GeminiClient
 from agent.infrastructure.neo4j_client import Neo4jClient
+from agent.infrastructure.nomic_client import NomicClient
 from agent.infrastructure.pinecone_client import PineconeClient
 from agent.settings import settings
 
@@ -22,4 +23,8 @@ pinecone_client = PineconeClient(
 
 gemini_client = GeminiClient(
     api_key=settings.gemini_api_key.get_secret_value(),
+)
+
+nomic_client = NomicClient(
+    model_name=settings.nomic_model_name,
 )

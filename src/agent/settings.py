@@ -27,8 +27,13 @@ class Settings(BaseSettings):
     # Pinecone
     pinecone_api_key: SecretStr
     pinecone_index_chunks_name: str = "chunks"
-    pinecone_index_summaries: str = "summaries"
-    pinecone_index_communities: str = "communities"
+    pinecone_index_community_summaries: str = "community-summaries"
+
+    # Nomic embedding model
+    nomic_model_name: str = "nomic-ai/nomic-embed-text-v1.5"
+
+    # Data volume path
+    data_volume_path: str = "data_volume/assets"
 
 
 # Initialize singleton settings

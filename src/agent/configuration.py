@@ -9,6 +9,7 @@ from typing import Any
 @dataclass(frozen=True)
 class Configuration:
     """Runtime configuration for the agent, decoupled from environment secrets."""
+
     model: str = field(
         default="gemini-1.5-flash",
         metadata={"description": "The name of the language model to use."},
@@ -17,11 +18,27 @@ class Configuration:
         default=5,
         metadata={"description": "Number of documents to retrieve."},
     )
+    community_level: int = field(
+        default=2,
+        metadata={"description": "Leiden community level for global search."},
+    )
+    neighborhood_depth: int = field(
+        default=1,
+        metadata={"description": "Number of hops for local expansion."},
+    )
+    similarity_threshold: float = field(
+        default=0.5,
+        metadata={"description": "Min cosine similarity for relation traversal."},
+    )
 
     @classmethod
-    def from_runnable_config(cls, config: dict[str, Any] | None = None) -> Configuration:
+    def from_runnable_config(
+        cls, config: dict[str, Any] | None = None
+    ) -> Configuration:
         """Extract configuration from LangGraph runtime config."""
         if not config or "configurable" not in config:
             return cls()
         configurable = config["configurable"]
-        return cls(**{k: v for k, v in configurable.items() if k in cls.__dataclass_fields__})
+        return cls(
+            **{k: v for k, v in configurable.items() if k in cls.__dataclass_fields__}
+        )

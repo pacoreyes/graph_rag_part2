@@ -18,6 +18,9 @@ dependencies = [
     "curl-cffi",
     "chainlit>=2.9.5",
     "structlog>=25.1.0",
+    "polars",
+    "torch>=2.0.0",
+    "transformers>=4.40.0",
 ]
 
 
