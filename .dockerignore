@@ -1,0 +1,33 @@
+# Git
+.git
+.gitignore
+
+# Python
+__pycache__
+*.pyc
+*.pyo
+*.pyd
+.Python
+env/
+venv/
+.venv
+.pytest_cache/
+.ruff_cache/
+.mypy_cache/
+
+# Chainlit
+.chainlit/translations
+.chainlit/config.toml.bak
+
+# Secrets
+.env
+*.key
+*.pem
+
+# Project
+tests/
+legacy_scripts/
+data_volume/
+docs/
+work_LOG.md
+Makefile

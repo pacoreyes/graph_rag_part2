@@ -1,0 +1,32 @@
+/* Overriding the primary color variables */
+:root {
+    --primary-main: #ffffff !important;
+    --primary-main-v2: #ffffff !important;
+}
+
+/* 
+Target the submit button by every possible selector.
+Chainlit uses 'bg-primary' which is usually the pink color.
+*/
+
+button[type="submit"],
+.bg-primary,
+[data-testid="submit-button"],
+.watermark + div button {
+    background-color: #ffffff !important;
+    background: #ffffff !important;
+    color: #000000 !important;
+}
+
+/* The arrow icon inside the button */
+button[type="submit"] svg,
+.bg-primary svg,
+[data-testid="submit-button"] svg {
+    fill: #000000 !important;
+    color: #000000 !important;
+}
+
+/* Force black color for text if it's a text button */
+button[type="submit"] span {
+    color: #000000 !important;
+}
