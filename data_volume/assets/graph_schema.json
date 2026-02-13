@@ -1,0 +1,63 @@
+{
+  "node_labels": [
+    "Entity",
+    "ALBUM",
+    "CITY",
+    "COUNTRY",
+    "EVENT",
+    "GENRE",
+    "GROUP",
+    "INSTRUMENT",
+    "PERSON",
+    "RECORD_LABEL",
+    "SOCIAL_MOVEMENT",
+    "SONG",
+    "THEME",
+    "Community"
+  ],
+  "relationship_types": [
+    "ASSOCIATED_WITH_MOVEMENT",
+    "COLLABORATES_WITH",
+    "EXPLORES_THEME",
+    "FORMER_MEMBER_OF",
+    "HAS_GENRE",
+    "INCLUDED_IN_ALBUM",
+    "INSPIRED_BY_MOVEMENT",
+    "IN_COMMUNITY",
+    "LOCATED_IN",
+    "MEMBER_OF_GROUP",
+    "ORIGINATES_FROM",
+    "PERFORMED_AT",
+    "RELEASED_ALBUM",
+    "RELEASED_ON_LABEL",
+    "RELEASED_SINGLE",
+    "USES_INSTRUMENT"
+  ],
+  "entity_properties": [
+    "id",
+    "name",
+    "type",
+    "qid",
+    "description",
+    "aliases",
+    "mention_count",
+    "chunk_ids",
+    "embedding",
+    "community_L0",
+    "community_L1",
+    "community_L2",
+    "pagerank"
+  ],
+  "relationship_properties": [
+    "description",
+    "mention_count",
+    "chunk_ids",
+    "embedding"
+  ],
+  "community_properties": [
+    "id",
+    "level",
+    "summary",
+    "rank"
+  ]
+}

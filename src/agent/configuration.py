@@ -11,7 +11,7 @@ class Configuration:
     """Runtime configuration for the agent, decoupled from environment secrets."""
 
     model: str = field(
-        default="gemini-1.5-flash",
+        default="gemini-2.0-flash",
         metadata={"description": "The name of the language model to use."},
     )
     retrieval_k: int = field(
@@ -20,7 +20,9 @@ class Configuration:
     )
     community_level: int = field(
         default=2,
-        metadata={"description": "Leiden community level for global search."},
+        metadata={
+            "description": "Leiden community level for global search (0, 1, 2). Use -1 for all levels."
+        },
     )
     neighborhood_depth: int = field(
         default=1,

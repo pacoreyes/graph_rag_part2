@@ -1,15 +1,15 @@
 """Neo4j async driver manager with dependency injection."""
 
+import asyncio
+
 from neo4j import AsyncDriver, AsyncGraphDatabase
 
 
 class Neo4jClient:
-    """Manager for Neo4j asynchronous driver.
+    """Manager for Neo4j asynchronous driver with per-loop caching.
 
-    Args:
-        uri: Neo4j connection URI.
-        username: Neo4j username.
-        password: Neo4j password.
+    Avoids 'Future attached to a different loop' errors when LangGraph
+    runs nodes in parallel.
     """
 
     def __init__(self, uri: str, username: str, password: str) -> None:
@@ -17,22 +17,25 @@ class Neo4jClient:
         self._uri = uri
         self._username = username
         self._password = password
-        self._driver: AsyncDriver | None = None
+        self._drivers: dict[int, AsyncDriver] = {}
 
     def get_driver(self) -> AsyncDriver:
-        """Get or lazily initialize the Neo4j async driver.
+        """Get or lazily initialize the Neo4j async driver for current loop.
 
         Returns:
             AsyncDriver: The Neo4j async driver instance.
         """
-        if self._driver is None:
-            self._driver = AsyncGraphDatabase.driver(
-                self._uri, auth=(self._username, self._password)
+        loop_id = id(asyncio.get_event_loop())
+        if loop_id not in self._drivers:
+            self._drivers[loop_id] = AsyncGraphDatabase.driver(
+                self._uri,
+                auth=(self._username, self._password),
+                max_connection_lifetime=300,
             )
-        return self._driver
+        return self._drivers[loop_id]
 
     async def close(self) -> None:
-        """Clean up the driver connection."""
-        if self._driver:
-            await self._driver.close()
-            self._driver = None
+        """Clean up all driver connections across all loops."""
+        for driver in self._drivers.values():
+            await driver.close()
+        self._drivers.clear()

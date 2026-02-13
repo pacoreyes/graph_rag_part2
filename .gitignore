@@ -23,11 +23,11 @@ build/
 dist/
 *.egg-info/
 
-data_volume/
-experiments/
+# data_volume/
 
-# Dagster
+# LangGraph
 .tmp_*
+.langgraph_api
 
 # AI Coding assistants
 .gemini/
@@ -42,3 +42,4 @@ experiments/
 legacy_scripts/
 
 TO_LANGGRAPH.md
+LANG_GRAPH_STATUS.md

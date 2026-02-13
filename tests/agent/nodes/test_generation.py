@@ -36,40 +36,43 @@ def _make_config(**configurable):
 @patch("agent.nodes.generation.gemini_generate")
 async def test_query_analyzer_local(mock_generate, mock_gc):
     mock_gc.get_client.return_value = MagicMock()
-    mock_generate.return_value = "local"
+    mock_generate.return_value = '{"strategy": "local", "target_entity_types": ["PERSON"]}'
 
     result = await query_analyzer(_make_state(), _make_config())
 
     assert result["strategy"] == "local"
+    assert result["target_entity_types"] == ["PERSON"]
 
 
 @patch("agent.nodes.generation.gemini_client")
 @patch("agent.nodes.generation.gemini_generate")
 async def test_query_analyzer_global(mock_generate, mock_gc):
     mock_gc.get_client.return_value = MagicMock()
-    mock_generate.return_value = "global"
+    mock_generate.return_value = '{"strategy": "global", "target_entity_types": []}'
 
     result = await query_analyzer(_make_state(), _make_config())
 
     assert result["strategy"] == "global"
+    assert result["target_entity_types"] == []
 
 
 @patch("agent.nodes.generation.gemini_client")
 @patch("agent.nodes.generation.gemini_generate")
 async def test_query_analyzer_hybrid(mock_generate, mock_gc):
     mock_gc.get_client.return_value = MagicMock()
-    mock_generate.return_value = "hybrid"
+    mock_generate.return_value = '{"strategy": "hybrid", "target_entity_types": ["GENRE", "GROUP"]}'
 
     result = await query_analyzer(_make_state(), _make_config())
 
     assert result["strategy"] == "hybrid"
+    assert result["target_entity_types"] == ["GENRE", "GROUP"]
 
 
 @patch("agent.nodes.generation.gemini_client")
 @patch("agent.nodes.generation.gemini_generate")
 async def test_query_analyzer_invalid_falls_back_to_hybrid(mock_generate, mock_gc):
     mock_gc.get_client.return_value = MagicMock()
-    mock_generate.return_value = "unknown_strategy"
+    mock_generate.return_value = '{"strategy": "unknown_strategy", "target_entity_types": []}'
 
     result = await query_analyzer(_make_state(), _make_config())
 
@@ -80,7 +83,7 @@ async def test_query_analyzer_invalid_falls_back_to_hybrid(mock_generate, mock_g
 @patch("agent.nodes.generation.gemini_generate")
 async def test_query_analyzer_strips_whitespace(mock_generate, mock_gc):
     mock_gc.get_client.return_value = MagicMock()
-    mock_generate.return_value = "  Local  \n"
+    mock_generate.return_value = '  {"strategy": "local", "target_entity_types": []}  \n'
 
     result = await query_analyzer(_make_state(), _make_config())
 

@@ -1,7 +1,11 @@
-"""Reusable Neo4j knowledge graph query function.
+"""Reusable Neo4j knowledge graph query function and schema utilities.
 
-Pure function with dependency injection — no global config or singletons.
+Pure functions with dependency injection — no global config or singletons.
 """
+
+import json
+from functools import lru_cache
+from pathlib import Path
 
 from neo4j import AsyncDriver
 
@@ -24,3 +28,48 @@ async def query_knowledge_graph(
     async with driver.session() as session:
         result = await session.run(query, parameters=parameters or {})
         return await result.data()
+
+
+@lru_cache
+def get_graph_schema(schema_path: Path) -> dict:
+    """Load the machine-readable graph schema from assets.
+
+    Args:
+        schema_path: Path to the graph_schema.json file.
+
+    Returns:
+        dict: The graph schema containing node_labels, relationship_types, etc.
+    """
+    if not schema_path.exists():
+        return {}
+    with open(schema_path, "r") as f:
+        return json.load(f)
+
+
+def format_schema_for_prompt(schema_path: Path) -> str:
+    """Format the schema into a concise string for LLM prompts.
+
+    Args:
+        schema_path: Path to the graph_schema.json file.
+
+    Returns:
+        str: Formatted schema description.
+    """
+    schema = get_graph_schema(schema_path)
+    if not schema:
+        return "Schema unavailable."
+
+    # Exclude Community/IN_COMMUNITY as per TO_LANGGRAPH.md if they exist in schema
+    node_labels = [
+        label for label in schema.get("node_labels", []) if label != "Community"
+    ]
+    rel_types = [
+        rel for rel in schema.get("relationship_types", []) if rel != "IN_COMMUNITY"
+    ]
+
+    lines = [
+        "## Graph Schema",
+        f"Node Types: {', '.join(node_labels)}",
+        f"Relationship Types: {', '.join(rel_types)}",
+    ]
+    return "\n".join(lines)

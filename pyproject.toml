@@ -21,6 +21,8 @@ dependencies = [
     "polars",
     "torch>=2.0.0",
     "transformers>=4.40.0",
+    "einops>=0.8.2",
+    "langgraph-cli[inmem]",
 ]
 
 

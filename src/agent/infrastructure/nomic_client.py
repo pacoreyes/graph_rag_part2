@@ -36,5 +36,7 @@ class NomicClient:
             PreTrainedTokenizer: The Nomic tokenizer.
         """
         if self._tokenizer is None:
-            self._tokenizer = AutoTokenizer.from_pretrained(self._model_name)
+            self._tokenizer = AutoTokenizer.from_pretrained(
+                self._model_name, trust_remote_code=True
+            )
         return self._tokenizer

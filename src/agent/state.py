@@ -22,6 +22,23 @@ class State:
     # Strategy selected by query_analyzer
     strategy: str = ""
 
+    # Reasoning and Loop management
+    plan: str = ""
+    critique: str = ""
+    iteration_count: int = 0
+    
+    # Evaluator output
+    retrieval_guide: str = ""
+    skip_deep_search: bool = False
+
+    # Generated Cypher query for structural strategy
+    generated_cypher: str = ""
+    cypher_result: list[dict] = field(default_factory=list)
+    cypher_error: str = ""
+
+    # Entity types identified by query_analyzer for surgical filtering
+    target_entity_types: list[str] = field(default_factory=list)
+
     # Nomic embedding of the user query (768-dim)
     query_embedding: list[float] = field(default_factory=list)
 

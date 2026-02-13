@@ -43,12 +43,12 @@ async def test_embed_query_returns_embedding(mock_nomic_client):
     mock_nomic_client.get_model.return_value = mock_model
     mock_nomic_client.get_tokenizer.return_value = mock_tokenizer
 
-    with patch("agent.nodes.retrieval.nomic_embed", return_value=[0.5] * 768):
+    with patch("agent.nodes.retrieval.nomic_embed", return_value=[0.5] * 384):
         state = _make_state()
         result = await embed_query(state, _make_config())
 
     assert "query_embedding" in result
-    assert len(result["query_embedding"]) == 768
+    assert len(result["query_embedding"]) == 384
 
 
 # --- entity_search ---
@@ -78,7 +78,7 @@ async def test_entity_search_returns_entities(mock_kg, mock_neo4j):
             "name": "Physics",
             "description": "Science",
             "qid": None,
-            "score": 0.7,
+            "score": 0.85,
         },
     ]
 
@@ -104,7 +104,7 @@ async def test_neighborhood_expand_traverses_entities(mock_kg, mock_neo4j):
             "rel_description": "born in",
             "target_id": "e3",
             "target_name": "Ulm",
-            "target_qid": "Q3012",
+            "qid": "Q3012",
         },
     ]
 
@@ -138,17 +138,39 @@ async def test_chunk_search_returns_chunks(mock_vs, mock_pc):
         "matches": [
             {
                 "id": "c1",
-                "score": 0.85,
-                "metadata": {"text": "Einstein was a physicist", "article_qid": "Q937"},
+                "score": 0.5,
+                "metadata": {
+                    "text": "High authority",
+                    "article_id": "Q1",
+                    "pagerank": 10.0,
+                    "entity_type": "PERSON"
+                },
+            },
+            {
+                "id": "c2",
+                "score": 0.8,
+                "metadata": {
+                    "text": "Low authority",
+                    "article_id": "Q2",
+                    "pagerank": 0.1,
+                    "entity_type": "PERSON"
+                },
             },
         ]
     }
 
-    state = _make_state(entities=[{"qid": "Q937"}])
-    result = await chunk_search(state, _make_config())
+    state = _make_state(entities=[{"qid": "Q1"}, {"qid": "Q2"}])
+    result = await chunk_search(state, _make_config(retrieval_k=2))
 
-    assert len(result["chunk_evidence"]) == 1
-    assert result["chunk_evidence"][0]["text"] == "Einstein was a physicist"
+    # Re-ranking:
+    # c1: 0.5 * log1p(10) = 0.5 * 2.39 = 1.195
+    # c2: 0.8 * log1p(0.1) = 0.8 * 0.095 = 0.076
+    # So c1 should be first even with lower initial score
+    assert len(result["chunk_evidence"]) == 2
+    assert result["chunk_evidence"][0]["id"] == "c1"
+    assert result["chunk_evidence"][0]["score"] > 1.0
+    assert result["chunk_evidence"][1]["id"] == "c2"
+    assert result["chunk_evidence"][0]["entity_type"] == "PERSON"
 
 
 @patch("agent.nodes.retrieval.pinecone_client")
@@ -162,6 +184,32 @@ async def test_chunk_search_no_filter_when_no_qids(mock_vs, mock_pc):
 
     call_kwargs = mock_vs.call_args[1]
     assert call_kwargs["filter_dict"] is None
+
+
+@patch("agent.nodes.retrieval.pinecone_client")
+@patch("agent.nodes.retrieval.vector_search")
+async def test_chunk_search_applies_surgical_filters(mock_vs, mock_pc):
+    mock_pc.get_client.return_value = MagicMock()
+    mock_vs.return_value = {"matches": []}
+
+    state = _make_state(
+        entities=[{"qid": "Q1"}],
+        community_reports=[{"community_id": 42}],
+        target_entity_types=["PERSON"],
+        strategy="hybrid"
+    )
+    await chunk_search(state, _make_config())
+
+    # Inspect the first call (filtered search)
+    first_call_kwargs = mock_vs.call_args_list[0][1]
+    filter_dict = first_call_kwargs["filter_dict"]
+    
+    # Check structure: $and with entity_type and $or (article_id, community_id)
+    assert "$and" in filter_dict
+    assert {"entity_type": {"$in": ["PERSON"]}} in filter_dict["$and"]
+    or_filter = next(f for f in filter_dict["$and"] if "$or" in f)["$or"]
+    assert {"article_id": {"$in": ["Q1"]}} in or_filter
+    assert {"community_id": {"$in": [42]}} in or_filter
 
 
 # --- community_search ---
@@ -217,7 +265,7 @@ async def test_community_members_returns_entities(mock_kg, mock_neo4j):
     ]
 
     state = _make_state(
-        community_reports=[{"community_id": "comm-1", "summary": "test"}]
+        community_reports=[{"community_id": "comm-1", "summary": "test", "level": 2}]
     )
     result = await community_members_search(state, _make_config())
 
