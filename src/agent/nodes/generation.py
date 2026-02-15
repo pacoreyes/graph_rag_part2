@@ -4,6 +4,9 @@ LLM-powered nodes for query analysis and answer synthesis.
 """
 
 import asyncio
+import json
+import math
+import re
 from pathlib import Path
 from typing import Any
 
@@ -13,6 +16,7 @@ from langchain_core.runnables import RunnableConfig
 
 from agent.configuration import Configuration
 from agent.infrastructure.clients import gemini_client
+from agent.nodes.models import RouterResponse, SynthesisResponse
 from agent.settings import settings
 from agent.state import State
 from agent.tools.gemini import gemini_generate
@@ -20,102 +24,42 @@ from agent.tools.knowledge_graph import format_schema_for_prompt
 
 logger = structlog.get_logger()
 
-PLANNER_PROMPT = (
-    "You are the Lead Planner for a music-domain GraphRAG agent.\n"
-    "{schema}\n\n"
-    "Your goal is to analyze the user query and create a multi-step retrieval and reasoning plan.\n\n"
+ROUTER_PROMPT = (
+    "You are the Intelligent Router for a music-domain GraphRAG agent.\n\n"
+    "Your goal is to analyze the user query and determine the most efficient retrieval strategy.\n\n"
     "STRATEGIES:\n"
-    '- "local": Use when the query is about specific entities and their direct properties.\n'
-    '- "global": Use for broad themes, movements, or trends spanning many entities.\n'
-    '- "drift": Use for multi-hop reasoning or following chains of influence.\n'
-    '- "structural": Use for precise lists, counts, or specific database filters.\n'
-    '- "hybrid": Use when multiple strategies are needed for full coverage.\n\n'
-    "FAST TRACK:\n"
-    "Set 'is_fast_track' to true ONLY if the query is a simple factoid question about a single entity "
-    "that can likely be answered by a direct lookup (e.g., 'Where is Kraftwerk from?', 'Who is the "
-    "lead singer of The Cure?'). Simple 'local' or 'structural' queries are good candidates.\n\n"
-    "JSON RESPONSE FORMAT:\n"
-    "{{\n"
-    '  "strategy": "...",\n'
-    '  "is_fast_track": true/false,\n'
-    '  "plan": "Detailed description of the steps you will take and why.",\n'
-    '  "target_entity_types": [...],\n'
-    '  "expected_outcome": "Description of what a successful answer should contain (e.g., \'A list of exactly 10 bands\')."\n'
-    "}}\n\n"
-    "User query: {query}\n\n"
-    "Respond with ONLY the JSON object."
-)
-
-STRATEGY_PROMPT = (
-    "You are a query analyzer for a music-domain GraphRAG system.\n"
-    "{schema}\n\n"
-    "Analyze the following user query and provide a JSON response with 'strategy' and 'target_entity_types'.\n\n"
-    "STRATEGIES:\n"
-    '- "local": The query is about specific entities (PERSON, GROUP, ALBUM, CITY) '
-    "and their direct properties.\n"
-    '- "global": The query asks about broad themes, SOCIAL_MOVEMENT, GENRE, or trends '
-    "spanning many entities.\n"
-    '- "drift": The query requires multi-hop reasoning or following chains of '
-    "relationships.\n"
-    '- "hybrid": The query combines specific entity questions with broader thematic context.\n'
-    '- "structural": The query asks for lists, counts, or specific properties '
-    "that can be answered by a direct database query (e.g., 'List 10 techno bands from UK').\n\n"
-    "TARGET ENTITY TYPES:\n"
-    "Identify which entity types from the schema are most relevant to the query to filter the search. "
-    "If the query is broad, return an empty list.\n\n"
-    "User query: {query}\n\n"
-    "Respond with ONLY a JSON object: {{\"strategy\": \"...\", \"target_entity_types\": [...]}}"
+    '- "local": Specific entities (PERSON, GROUP, ALBUM, CITY) and their direct properties.\n'
+    '- "global": Broad thematic questions, SOCIAL_MOVEMENT, GENRE, or trends spanning many entities.\n'
+    '- "drift": Multi-hop reasoning, following chains of influence, or abstract "impact" questions.\n'
+    '- "structural": Quantitative queries: counts ("How many"), lists ("List all"), or specific property filters ("released in 1989").\n'
+    '- "hybrid": Complex queries requiring both thematic context and specific database facts.\n\n'
+    "CRITICAL DISCRIMINATION RULES:\n"
+    "1. DO NOT use 'structural' for abstract queries using words like 'impact', 'influence', 'legacy', 'development', or 'significance'. These are better handled by 'drift' or 'global'.\n"
+    "2. ONLY use 'structural' if the question can be answered by a discrete relationship in the schema.\n"
+    "3. Set 'is_fast_track' to true ONLY for simple, single-entity factoid lookups.\n\n"
+    "User query: {query}"
 )
 
 SYNTHESIS_PROMPT = (
     "You are a knowledgeable music assistant answering questions using a "
     "combination of community thematic summaries, knowledge graph facts, "
     "original source text, and the underlying graph schema.\n\n"
-    "{schema}\n\n"
     "UNIFIED CONTEXT (Atomic Knowledge Units):\n"
     "{akus}\n\n"
-    "CRITIQUE FROM PREVIOUS ATTEMPT (if any):\n"
-    "{critique}\n\n"
     "RETRIEVAL GUIDE (Instructions for focus):\n"
     "{guide}\n\n"
     "Using the above, answer the user's question: {query}\n\n"
     "Guidelines:\n"
     "1. ATTENTION PINNING: Every claim MUST be immediately followed by the relevant index(es) in brackets (e.g., [1] or [1][3]).\n"
-    "2. TRUTH HIERARCHY: Prioritize AKUs from 'Graph DB' for structural facts and 'Vector DB' for descriptive context.\n"
-    "3. VERBATIM EVIDENCE: For every 'Vector DB' AKU you cite, you MUST provide a verbatim quote from its text to prove the claim.\n"
-    "4. NO HALLUCINATION: ONLY use numerical indices from the provided context list.\n"
-    "5. CLEAN SYNTHESIS: Provide the answer in plain text without markdown links, URLs, or markdown headers (e.g., # or ##).\n"
-    "6. JSON RESPONSE FORMAT:\n"
-    "{{\n"
-    '  "answer": "Your synthesis with [N] citations...",\n'
-    '  "evidence": {{\n'
-    '     "1": "Verbatim excerpt for AKU 1",\n'
-    '     "2": "Relationship or fact summary for AKU 2",\n'
-    '     ...\n'
-    '  }}\n'
-    "}}\n\n"
-    "Respond with ONLY the JSON object."
-)
-
-CYPHER_GENERATION_PROMPT = (
-    "You are a Cypher query generator for a music GraphRAG system.\n"
-    "SCHEMA:\n{schema}\n\n"
-    "Write a Cypher query to answer the following user question.\n"
-    "Guidelines:\n"
-    "1. Use the provided node types and properties from the schema.\n"
-    "2. Most text search should use 'CONTAINS' or 'db.index.fulltext.queryNodes' on 'entityNameIndex'.\n"
-    "3. ALWAYS start the query with 'EXPLAIN' so the system can validate it without execution first.\n"
-    "4. Return node properties like 'name', 'description', 'type', and 'qid'.\n"
-    "5. User query: {query}\n\n"
-    "Respond with ONLY the Cypher query block."
+    "2. CONSOLIDATION: If you have a long list of similar facts, summarize them and cite a representative sample (max 5 indices).\n"
+    "3. TRUTH HIERARCHY: Prioritize AKUs from 'Graph DB' for structural facts and 'Vector DB' for descriptive context.\n"
+    "4. VERBATIM EVIDENCE: For every 'Vector DB' AKU you cite, you MUST provide a verbatim quote from its text to prove the claim.\n"
+    "5. CLEAN SYNTHESIS: Provide the answer in plain text without markdown headers or links."
 )
 
 
 def _flatten_dict(d: dict) -> str:
-    """Flatten a dictionary into a comma-separated string of key-values.
-
-    Used for making Cypher results human-readable in the context.
-    """
+    """Flatten a dictionary into a comma-separated string of key-values."""
     parts = []
     for k, v in d.items():
         if v is not None:
@@ -123,24 +67,25 @@ def _flatten_dict(d: dict) -> str:
     return ", ".join(parts)
 
 
+def _calculate_aku_importance(aku: dict) -> float:
+    """Calculate a base importance score for an AKU."""
+    metadata = aku.get("metadata", {})
+    # Use mention_count (log-scaled) as primary importance signal
+    mention_count = float(metadata.get("mention_count") or 0)
+    pagerank = float(metadata.get("pagerank") or 0)
+    relevance_val = aku.get("raw_relevance_score")
+    relevance = float(relevance_val if relevance_val is not None else 0.5)
+    
+    authority = math.log1p(mention_count) + math.log1p(pagerank)
+    return relevance * (1 + authority)
+
+
 def homogenize_context(state: State) -> list[dict]:
-    """Unify all retrieval results into a single list of Atomic Knowledge Units (AKUs).
-
-    Applies deterministic sorting and indexing for the USA Framework with deduplication.
-
-    Args:
-        state: The current graph state.
-
-    Returns:
-        list[dict]: A list of indexed AKUs.
-    """
+    """Unify and prune retrieval results into a focused list of AKUs."""
     raw_akus = []
 
-    # 1. Process Entities (Sort by PageRank)
-    entities = sorted(
-        state.entities, key=lambda x: x.get("pagerank") or 0, reverse=True
-    )
-    for e in entities:
+    # 1. Process Entities
+    for e in state.entities:
         name = e.get("name", "Unknown")
         desc = e.get("description", "No description")
         e_type = e.get("type", "Entity")
@@ -148,51 +93,42 @@ def homogenize_context(state: State) -> list[dict]:
             "content": f"Entity ({e_type}): {name} - {desc}",
             "origin": e.get("origin", "Graph DB"),
             "method": e.get("method", "Entity Search"),
-            "metadata": {"qid": e.get("qid"), "type": e_type, "name": name}
+            "raw_relevance_score": e.get("score", 0.5),
+            "metadata": {
+                "qid": e.get("qid"), "type": e_type, "name": name, 
+                "mention_count": e.get("mention_count", 0), "pagerank": e.get("pagerank", 0)
+            }
         })
 
-    # 2. Process Relationships (Sort by Score)
-    relationships = sorted(
-        state.relationships, key=lambda x: x.get("score") or 0, reverse=True
-    )
-    for r in relationships:
+    # 2. Process Relationships
+    for r in state.relationships:
         source = r.get("source_name", "?")
         rel = r.get("relationship", "RELATED_TO")
-        # Fix: The neighbor search returns 'name' for the target entity
         target = r.get("target_name") or r.get("name", "?")
         desc = r.get("rel_description", "")
         content = f"Relationship: {source} --[{rel}]--> {target}"
-        if desc:
-            content += f" ({desc})"
+        if desc: content += f" ({desc})"
         raw_akus.append({
             "content": content,
             "origin": r.get("origin", "Graph DB"),
             "method": r.get("method", "Neighborhood Expansion"),
-            "metadata": {"qid": r.get("qid"), "type": rel, "name": f"{source} --[{rel}]--> {target}"}
+            "raw_relevance_score": r.get("score", 0.5),
+            "metadata": {"qid": r.get("qid"), "type": rel, "mention_count": r.get("mention_count", 0)}
         })
 
-    # 3. Process Text Chunks (Sort by Score)
-    chunks = sorted(
-        state.chunk_evidence, key=lambda x: x.get("score") or 0, reverse=True
-    )
-    for c in chunks:
+    # 3. Process Text Chunks
+    for c in state.chunk_evidence:
         content = c.get("text", "")
         raw_akus.append({
             "content": f"Text Evidence: {content}",
             "origin": c.get("origin", "Vector DB"),
             "method": c.get("method", "Surgical Search"),
-            "metadata": {
-                "article_id": c.get("article_id"), 
-                "chunk_id": c.get("id"), # Include the specific Pinecone ID
-                "type": "Text Chunk"
-            }
+            "raw_relevance_score": c.get("raw_score", c.get("score", 0.5)),
+            "metadata": {"chunk_id": c.get("id"), "type": "Text Chunk", "mention_count": c.get("mention_count", 0)}
         })
 
-    # 4. Process Community Reports (Sort by Score)
-    reports = sorted(
-        state.community_reports, key=lambda x: (x.get("level") or 0, x.get("score") or 0), reverse=True
-    )
-    for r in reports:
+    # 4. Process Community Reports
+    for r in state.community_reports:
         cid = r.get("community_id", "?")
         title = r.get("title", "")
         summary = r.get("summary", "No summary")
@@ -200,301 +136,150 @@ def homogenize_context(state: State) -> list[dict]:
             "content": f"Thematic Summary (Community {cid}): {title} - {summary}",
             "origin": r.get("origin", "Vector DB"),
             "method": r.get("method", "Community Search"),
-            "metadata": {"community_id": cid, "type": "Community Report", "name": f"Community {cid}: {title}"}
+            "raw_relevance_score": 0.9, # High weight for summaries
+            "metadata": {"community_id": cid, "type": "Community Report"}
         })
 
-    # 5. Process Cypher Results (Structural Query)
-    if state.cypher_result:
-        for res in state.cypher_result:
-            content = _flatten_dict(res)
-            raw_akus.append({
-                "content": f"Database Fact: {content}",
-                "origin": "Graph DB",
-                "method": "Cypher Query",
-                "metadata": {"type": "Query Result", "name": "Database Result"}
-            })
+    # 5. Process Cypher Results
+    for res in state.cypher_result:
+        content = _flatten_dict(res)
+        raw_akus.append({
+            "content": f"Database Fact: {content}",
+            "origin": "Graph DB",
+            "method": "Cypher Query",
+            "raw_relevance_score": 1.0,
+            "metadata": {"type": "Query Result"}
+        })
 
-    # Deduplication: Merge identical content
-    final_akus = []
-    seen_content = {} # content -> list_index
-    
+    # Deduplication and Scoring
+    unique_akus = []
+    seen_content = {}
     for aku in raw_akus:
         content = aku["content"]
         if content in seen_content:
-            existing = final_akus[seen_content[content]]
-            # Merge methods if different
+            existing = unique_akus[seen_content[content]]
             if aku["method"] not in existing["method"]:
                 existing["method"] = f"{existing['method']} & {aku['method']}"
         else:
-            seen_content[content] = len(final_akus)
-            final_akus.append(aku)
+            seen_content[content] = len(unique_akus)
+            aku["importance"] = _calculate_aku_importance(aku)
+            unique_akus.append(aku)
 
-    # Assign sequential indices [1], [2], ...
+    # Pruning: Sort by importance and cap redundancy
+    unique_akus.sort(key=lambda x: x["importance"], reverse=True)
+    
+    final_akus = []
+    structural_count = 0
+    MAX_AKUS, MAX_STRUCTURAL = 20, 8
+    
+    for aku in unique_akus:
+        if len(final_akus) >= MAX_AKUS: break
+        
+        is_structural = "Database Fact" in aku["content"] or "Relationship" in aku["content"]
+        if is_structural:
+            if structural_count >= MAX_STRUCTURAL: continue
+            structural_count += 1
+            
+        final_akus.append(aku)
+
     for i, aku in enumerate(final_akus, 1):
         aku["index"] = i
-
     return final_akus
 
 
 def _format_akus_for_prompt(akus: list[dict]) -> str:
-    """Format AKUs into a readable block for the prompt.
-
-    Args:
-        akus: List of indexed AKU dicts.
-
-    Returns:
-        str: Formatted context block.
-    """
-    if not akus:
-        return "No context available."
-    
-    lines = []
-    for aku in akus:
-        lines.append(
-            f"[{aku['index']}] {aku['content']} "
-            f"(Origin: {aku['origin']} | Method: {aku['method']})"
-        )
-    return "\n".join(lines)
+    """Format AKUs into a readable block for the prompt."""
+    if not akus: return "No context available."
+    return "\n".join([f"[{aku['index']}] {aku['content']} (Origin: {aku['origin']} | Method: {aku['method']})" for aku in akus])
 
 
 def _get_query_text(message: Any) -> str:
-    """Extract string content from a message, handling list-of-blocks format."""
+    """Extract string content from a message."""
     content = message.content
-    if isinstance(content, str):
-        return content
+    if isinstance(content, str): return content
     if isinstance(content, list):
         for block in content:
-            if isinstance(block, dict) and block.get("type") == "text":
-                return block.get("text", "")
-            if isinstance(block, str):
-                return block
+            if isinstance(block, dict) and block.get("type") == "text": return block.get("text", "")
+            if isinstance(block, str): return block
     return str(content)
 
 
-async def planner(state: State, config: RunnableConfig) -> dict[str, Any]:
-    """Analyze query and generate a structured retrieval and reasoning plan.
-
-    Args:
-        state: Current graph state.
-        config: LangGraph runtime configuration.
-
-    Returns:
-        dict[str, Any]: State update with strategy, plan, target_entity_types, and expected_outcome.
-    """
+async def router(state: State, config: RunnableConfig) -> dict[str, Any]:
+    """Consolidated router node with structured output and context caching."""
     configuration = Configuration.from_runnable_config(config)
     client = await gemini_client.get_client()
-    last_message = state.messages[-1]
-    query_text = _get_query_text(last_message)
-
-    schema = format_schema_for_prompt(Path(settings.data_volume_path) / "graph_schema.json")
-    prompt = PLANNER_PROMPT.format(schema=schema, query=query_text)
+    query_text = _get_query_text(state.messages[-1])
+    
+    # Context Caching: Use schema from client's pseudo-cache
+    system_instruction = gemini_client.get_schema_instruction()
+    prompt = ROUTER_PROMPT.format(query=query_text)
 
     response_text = await asyncio.to_thread(
-        gemini_generate, client, prompt, model=configuration.model
+        gemini_generate, 
+        client, 
+        prompt, 
+        model=configuration.model,
+        response_schema=RouterResponse,
+        system_instruction=system_instruction
     )
-    response_text = response_text.strip()
-    if response_text.startswith("```json"):
-        response_text = response_text.replace("```json", "").replace("```", "").strip()
 
     try:
-        import json
         data = json.loads(response_text)
         strategy = data.get("strategy", "hybrid").lower()
         is_fast_track = data.get("is_fast_track", False)
-        plan = data.get("plan", "")
         target_entity_types = data.get("target_entity_types", [])
-        expected_outcome = data.get("expected_outcome", "")
+        plan = data.get("plan", "Optimized routing.")
     except Exception:
-        logger.warning("planner_parse_failed", raw=response_text)
-        strategy = "hybrid"
-        is_fast_track = False
-        plan = "Fallback to hybrid search."
-        target_entity_types = []
-        expected_outcome = ""
+        strategy, is_fast_track, target_entity_types, plan = "hybrid", False, [], "Fallback."
 
+    # Validate strategy
     if strategy not in ("local", "global", "drift", "hybrid", "structural"):
         strategy = "hybrid"
 
-    logger.info("planner_done", strategy=strategy, fast_track=is_fast_track, plan=plan)
-    return {
-        "strategy": strategy, 
-        "is_fast_track": is_fast_track,
-        "plan": plan, 
-        "target_entity_types": target_entity_types,
-        "iteration_count": 0 # Reset loop counter on new question
-    }
+    logger.info("router_done", strategy=strategy, fast_track=is_fast_track)
+    return {"strategy": strategy, "is_fast_track": is_fast_track, "target_entity_types": target_entity_types, "plan": plan, "iteration_count": 0}
 
-
-async def query_analyzer(state: State, config: RunnableConfig) -> dict[str, Any]:
-    """Classify the user query into a search strategy and identify target types.
-
-    Calls Gemini to determine search strategy and relevant entity types.
-
-    Args:
-        state: Current graph state.
-        config: LangGraph runtime configuration.
-
-    Returns:
-        dict[str, Any]: Partial state update with strategy and target_entity_types.
-    """
-    configuration = Configuration.from_runnable_config(config)
-    client = await gemini_client.get_client()
-    last_message = state.messages[-1]
-    query_text = _get_query_text(last_message)
-
-    schema_path = Path(settings.data_volume_path) / "graph_schema.json"
-    schema = format_schema_for_prompt(schema_path)
-    prompt = STRATEGY_PROMPT.format(schema=schema, query=query_text)
-
-    # Use JSON response if supported or strip markdown
-    response_text = await asyncio.to_thread(
-        gemini_generate, client, prompt, model=configuration.model
-    )
-    response_text = response_text.strip()
-    if response_text.startswith("```json"):
-        response_text = response_text.replace("```json", "").replace("```", "").strip()
-
-    try:
-        import json
-
-        data = json.loads(response_text)
-        strategy = data.get("strategy", "hybrid").lower()
-        target_entity_types = data.get("target_entity_types", [])
-    except Exception:
-        logger.warning("query_analyzer_parse_failed", raw=response_text)
-        strategy = "hybrid"
-        target_entity_types = []
-
-    # Validate to one of the four strategies
-    if strategy not in ("local", "global", "drift", "hybrid"):
-        strategy = "hybrid"
-
-    logger.info("query_analyzer_done", strategy=strategy, types=target_entity_types)
-    return {"strategy": strategy, "target_entity_types": target_entity_types}
-
-
-async def cypher_generator(state: State, config: RunnableConfig) -> dict[str, Any]:
-    """Generate a Cypher query based on the user question and schema.
-
-    Args:
-        state: Current graph state.
-        config: LangGraph runtime configuration.
-
-    Returns:
-        dict[str, Any]: Partial state update with generated_cypher.
-    """
-    configuration = Configuration.from_runnable_config(config)
-    client = await gemini_client.get_client()
-    last_message = state.messages[-1]
-    query_text = _get_query_text(last_message)
-
-    schema = format_schema_for_prompt(Path(settings.data_volume_path) / "graph_schema.json")
-    prompt = CYPHER_GENERATION_PROMPT.format(schema=schema, query=query_text)
-
-    response_text = await asyncio.to_thread(
-        gemini_generate, client, prompt, model=configuration.model
-    )
-    response_text = response_text.strip()
-    
-    # Clean up markdown code blocks
-    if "```cypher" in response_text:
-        response_text = response_text.split("```cypher")[1].split("```")[0].strip()
-    elif "```" in response_text:
-        response_text = response_text.split("```")[1].split("```")[0].strip()
-
-    logger.info("cypher_generator_done", query=response_text)
-    return {"generated_cypher": response_text}
-
-
-import re
 
 def _resolve_aku_legend(answer: str, akus: list[dict], source_urls: dict[str, dict[str, str]], llm_evidence: dict[str, str] = None) -> tuple[str, str]:
-    """Build a structured legend and re-index citations sequentially.
-
-    Parses the answer for [N] citations, maps them to [1], [2], etc. based
-    on appearance order, and resolves them to their metadata.
-
-    Args:
-        answer: The LLM-generated answer text.
-        akus: The list of Atomic Knowledge Units provided to the LLM.
-        source_urls: Mapping of QID/article_id to metadata (name, url).
-        llm_evidence: Optional mapping of raw index to verbatim quote or summary from LLM.
-
-    Returns:
-        tuple[str, str]: (updated_answer, legend_section)
-    """
-    # 1. Find all raw indices in order of appearance
+    """Build a structured legend and re-index citations sequentially."""
     raw_citations = re.findall(r"\[(\d+)\]", answer)
-    if not raw_citations:
-        return answer, ""
+    if not raw_citations: return answer, ""
 
-    # 2. Map raw index -> new sequential index
-    raw_to_new = {}
-    new_idx = 1
+    raw_to_new, new_idx = {}, 1
     for raw in raw_citations:
         if raw not in raw_to_new:
             raw_to_new[raw] = str(new_idx)
             new_idx += 1
 
-    # 3. Update the answer text with new indices
-    # We use a lambda to avoid replacing partial matches
     updated_answer = re.sub(r"\[(\d+)\]", lambda m: f"[{raw_to_new[m.group(1)]}]", answer)
-
-    # 4. Build the legend
     aku_map = {str(aku["index"]): aku for aku in akus}
     legend_lines = ["\n---", "**Sources & Evidence Path:**"]
     
-    # Iterate through our mapping to build the legend in order of appearance
     for raw, seq in raw_to_new.items():
         aku = aku_map.get(raw)
-        if not aku:
-            continue
-        
+        if not aku: continue
         metadata = aku.get("metadata", {})
         qid = metadata.get("qid") or metadata.get("article_id")
         source_info = source_urls.get(qid) if qid else None
-        
-        origin = aku.get("origin", "Unknown")
-        method = aku.get("method", "Unknown")
-        
-        # Priority 1: Use LLM-provided verbatim quote/summary if available
+        origin, method = aku.get("origin", "Unknown"), aku.get("method", "Unknown")
         content_label = llm_evidence.get(raw) if llm_evidence else None
         
         line = f"- `[{seq}]` "
-        
-        # Format based on origin
         if origin == "Vector DB":
-            # If no LLM quote, fallback to cleaned content snippet
             if not content_label:
-                content_label = aku['content'].split(": ", 1)[-1] if ": " in aku['content'] else aku['content']
-                content_label = f"{content_label[:120]}..."
-            
+                snippet = aku['content'].split(": ", 1)[-1] if ": " in aku['content'] else aku['content']
+                content_label = f"{snippet[:120]}..."
             line += f'"{content_label}"'
-            
-            # Add Chunk ID for surgical auditing
-            if metadata.get("chunk_id"):
-                line += f" | ID: {metadata['chunk_id']}"
-
-            if source_info:
-                name = source_info.get("name", "Source")
-                url = source_info.get("wikipedia_url")
-                if url:
-                    line += f" ([{name}]({url}))"
+            if metadata.get("chunk_id"): line += f" | ID: {metadata['chunk_id']}"
         else:
-            # Graph DB or other structural sources
-            if content_label:
-                line += f"{content_label}"
-            elif metadata.get("name"):
-                line += f"{metadata['name']}"
-            else:
-                line += f"{aku['content'][:120]}..."
-
-            if source_info:
-                name = source_info.get("name", "Source")
-                url = source_info.get("wikipedia_url")
-                if url:
-                    line += f" ([{name}]({url}))"
-
+            if content_label: line += f"{content_label}"
+            elif metadata.get("name"): line += f"{metadata['name']}"
+            else: line += f"{aku['content'][:120]}..."
+        
+        if source_info:
+            name, url = source_info.get("name", "Source"), source_info.get("wikipedia_url")
+            if url: line += f" ([{name}]({url}))"
+        
         line += f" | Origin: {origin} | Method: {method}"
         legend_lines.append(line)
 
@@ -502,89 +287,46 @@ def _resolve_aku_legend(answer: str, akus: list[dict], source_urls: dict[str, di
 
 
 def _check_faithfulness(answer: str, akus: list[dict]) -> dict[str, Any]:
-    """Heuristic check for attribution density and potential drift.
-
-    Args:
-        answer: The generated answer text.
-        akus: The provided context units.
-
-    Returns:
-        dict[str, Any]: Results of the check (is_faithful, issues).
-    """
+    """Heuristic check for attribution density."""
     citations = re.findall(r"\[(\d+)\]", answer)
-    unique_citations = set(citations)
-    
-    # 1. Density check: At least 1 citation per 100 characters for non-trivial answers
     if len(answer) > 200 and len(citations) < (len(answer) / 200):
         return {"is_faithful": False, "issue": "Low citation density"}
-
-    # 2. Hallucination check: Are all cited indices in the context?
     valid_indices = {str(aku["index"]) for aku in akus}
-    hallucinated = unique_citations - valid_indices
-    if hallucinated:
-        return {"is_faithful": False, "issue": f"Hallucinated indices: {hallucinated}"}
-
+    hallucinated = set(citations) - valid_indices
+    if hallucinated: return {"is_faithful": False, "issue": f"Hallucinated indices: {hallucinated}"}
     return {"is_faithful": True, "issue": None}
 
 
 async def synthesize_answer(state: State, config: RunnableConfig) -> dict[str, Any]:
-    """Synthesize a final answer from all retrieved context using AKUs.
-
-    Args:
-        state: Current graph state.
-        config: LangGraph runtime configuration.
-
-    Returns:
-        dict[str, Any]: Partial state update with AIMessage answer and akus.
-    """
+    """Synthesize a final answer from all retrieved context using AKUs."""
     configuration = Configuration.from_runnable_config(config)
     client = await gemini_client.get_client()
-    last_message = state.messages[-1]
-    query_text = _get_query_text(last_message)
-
-    # Homogenize context into AKUs
+    query_text = _get_query_text(state.messages[-1])
     akus = homogenize_context(state)
-
-    # Build structured prompt with unified AKUs
-    schema_path = Path(settings.data_volume_path) / "graph_schema.json"
-    schema = format_schema_for_prompt(schema_path)
-    prompt = SYNTHESIS_PROMPT.format(
-        schema=schema,
-        akus=_format_akus_for_prompt(akus),
-        critique=state.critique,
-        guide=state.retrieval_guide,
-        query=query_text,
-    )
-    raw_response = await asyncio.to_thread(
-        gemini_generate, client, prompt, model=configuration.model
-    )
-    raw_response = raw_response.strip()
     
-    # Clean up JSON if LLM added markdown blocks
-    if raw_response.startswith("```json"):
-        raw_response = raw_response.replace("```json", "").replace("```", "").strip()
-    elif raw_response.startswith("```"):
-        raw_response = raw_response.replace("```", "").strip()
+    system_instruction = gemini_client.get_schema_instruction()
+    prompt = SYNTHESIS_PROMPT.format(akus=_format_akus_for_prompt(akus), guide=state.retrieval_guide, query=query_text)
+    
+    response_text = await asyncio.to_thread(
+        gemini_generate, 
+        client, 
+        prompt, 
+        model=configuration.model,
+        response_schema=SynthesisResponse,
+        system_instruction=system_instruction
+    )
 
     try:
-        import json
-        data = json.loads(raw_response)
+        data = json.loads(response_text)
         answer = data.get("answer", "")
-        evidence = data.get("evidence", {})
+        # Convert List[EvidenceItem] to Dict[index, content] for compatibility
+        evidence_list = data.get("evidence", [])
+        evidence = {str(item.get("index")): item.get("content") for item in evidence_list if isinstance(item, dict)}
     except Exception:
-        logger.warning("synthesize_answer_json_parse_failed", raw=raw_response)
-        # Fallback to assuming the raw response is the answer if parsing fails
-        answer = raw_response
-        evidence = {}
+        answer, evidence = response_text, {}
 
-    # Phase 3: Streamlined Resolution & Semantic Validation
     faithfulness = _check_faithfulness(answer, akus)
-    if not faithfulness["is_faithful"]:
-        logger.warning("synthesis_faithfulness_low", issue=faithfulness["issue"])
-
-    # Build the structural attribution report (Final Mapping)
     updated_answer, legend = _resolve_aku_legend(answer, akus, state.source_urls, llm_evidence=evidence)
     final_answer = updated_answer + legend
-
-    logger.info("synthesize_answer_done", length=len(final_answer), aku_count=len(akus), faithful=faithfulness["is_faithful"])
+    logger.info("synthesize_answer_done", length=len(final_answer), aku_count=len(akus))
     return {"messages": [AIMessage(content=final_answer)], "akus": akus}

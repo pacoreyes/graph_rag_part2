@@ -78,7 +78,7 @@ async def on_message(message: cl.Message) -> None:
                 final_reply = _extract_ai_response(new_messages)
 
             # Update the same step instead of creating new ones
-            active_step.name = f"Executing: {node_name}"
+            active_step.name = f"{node_name}"
 
             if node_name == "planner":
                 active_step.output = f"Thought: {state_update.get('plan', 'unknown')}"

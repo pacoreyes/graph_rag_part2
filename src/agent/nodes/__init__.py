@@ -1,6 +1,6 @@
 """Graph node functions for the LangGraph agent."""
 
-from agent.nodes.generation import query_analyzer, synthesize_answer
+from agent.nodes.generation import router, synthesize_answer
 from agent.nodes.retrieval import (
     chunk_search,
     community_members_search,
@@ -18,7 +18,7 @@ __all__ = [
     "embed_query",
     "entity_search",
     "neighborhood_expand",
-    "query_analyzer",
+    "router",
     "resolve_sources",
     "synthesize_answer",
 ]

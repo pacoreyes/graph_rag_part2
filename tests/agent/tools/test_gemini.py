@@ -49,7 +49,9 @@ def test_gemini_generate_returns_text():
 
     assert result == "Generated response"
     mock_client.models.generate_content.assert_called_once_with(
-        model="models/gemini-2.0-flash", contents="Say hello"
+        model="models/gemini-2.0-flash", 
+        contents="Say hello",
+        config={}
     )
 
 
@@ -63,5 +65,7 @@ def test_gemini_generate_custom_model():
     gemini_generate(client=mock_client, prompt="test", model="custom-gen-model")
 
     mock_client.models.generate_content.assert_called_once_with(
-        model="custom-gen-model", contents="test"
+        model="custom-gen-model", 
+        contents="test",
+        config={}
     )
