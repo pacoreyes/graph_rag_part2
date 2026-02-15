@@ -48,7 +48,7 @@ ENTITY_VECTOR_SEARCH = (
 
 # Semantic Relation Search (DRIFT) - find semantically relevant neighbors
 SEMANTIC_RELATION_SEARCH = (
-    "MATCH (e:Entity {id: $entity_id})-[r]->(neighbor:Entity) "
+    "MATCH (e {id: $entity_id})-[r]->(neighbor) "
     "WITH e, neighbor, r, vector.similarity.cosine(r.embedding, $embedding) AS score "
     "WHERE score > $threshold "
     "RETURN e.name AS source_name, type(r) AS relationship, r.description AS rel_description, "
@@ -59,23 +59,23 @@ SEMANTIC_RELATION_SEARCH = (
 
 # Property-based community membership (replaces IN_COMMUNITY edges)
 COMMUNITY_MEMBERS_L0 = (
-    "MATCH (e:Entity) WHERE e.community_L0 = $community_id "
+    "MATCH (e) WHERE e.community_L0 = $community_id "
     "RETURN e.id AS id, e.name AS name, e.description AS description, "
-    "e.qid AS qid, e.pagerank AS pagerank "
+    "e.type AS type, e.qid AS qid, e.pagerank AS pagerank "
     "ORDER BY e.pagerank DESC LIMIT 20"
 )
 
 COMMUNITY_MEMBERS_L1 = (
-    "MATCH (e:Entity) WHERE e.community_L1 = $community_id "
+    "MATCH (e) WHERE e.community_L1 = $community_id "
     "RETURN e.id AS id, e.name AS name, e.description AS description, "
-    "e.qid AS qid, e.pagerank AS pagerank "
+    "e.type AS type, e.qid AS qid, e.pagerank AS pagerank "
     "ORDER BY e.pagerank DESC LIMIT 20"
 )
 
 COMMUNITY_MEMBERS_L2 = (
-    "MATCH (e:Entity) WHERE e.community_L2 = $community_id "
+    "MATCH (e) WHERE e.community_L2 = $community_id "
     "RETURN e.id AS id, e.name AS name, e.description AS description, "
-    "e.qid AS qid, e.pagerank AS pagerank "
+    "e.type AS type, e.qid AS qid, e.pagerank AS pagerank "
     "ORDER BY e.pagerank DESC LIMIT 20"
 )
 
@@ -183,7 +183,7 @@ async def entity_search(state: State, config: RunnableConfig) -> dict[str, Any]:
         # Add origin metadata for USA Framework
         row["origin"] = "Graph DB"
         row["method"] = "Entity Search (Fulltext/Vector)"
-        row["type"] = "Node"
+        # row["type"] is preserved from Neo4j result
         entities.append(row)
         if row.get("qid"):
             qids.append(row["qid"])
@@ -255,7 +255,7 @@ async def neighborhood_expand(state: State, config: RunnableConfig) -> dict[str,
                 # Add origin metadata for USA Framework
                 row["origin"] = "Graph DB"
                 row["method"] = "Neighborhood Expansion (DRIFT)"
-                row["type"] = "Relationship"
+                # row["type"] is already set to the relationship type from Cypher
                 
                 all_relationships.append(row)
                 if row.get("qid"):
@@ -488,7 +488,7 @@ async def community_members_search(
         for row in results:
             row["origin"] = "Graph DB"
             row["method"] = f"Community Discovery (L{level})"
-            row["type"] = "Node"
+            # Use the actual type from the row
             
         all_entities.extend(results)
         for row in results:

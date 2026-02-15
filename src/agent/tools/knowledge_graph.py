@@ -84,13 +84,8 @@ def format_schema_for_prompt(schema_path: Path) -> str:
     if not schema:
         return "Schema unavailable."
 
-    # Exclude Community/IN_COMMUNITY as per TO_LANGGRAPH.md if they exist in schema
-    node_labels = [
-        label for label in schema.get("node_labels", []) if label != "Community"
-    ]
-    rel_types = [
-        rel for rel in schema.get("relationship_types", []) if rel != "IN_COMMUNITY"
-    ]
+    node_labels = schema.get("node_labels", [])
+    rel_types = schema.get("relationship_types", [])
 
     lines = [
         "## Graph Schema",

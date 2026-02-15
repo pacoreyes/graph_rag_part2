@@ -51,9 +51,9 @@ STRATEGY_PROMPT = (
     "{schema}\n\n"
     "Analyze the following user query and provide a JSON response with 'strategy' and 'target_entity_types'.\n\n"
     "STRATEGIES:\n"
-    '- "local": The query is about specific entities (artists, albums, cities) '
+    '- "local": The query is about specific entities (PERSON, GROUP, ALBUM, CITY) '
     "and their direct properties.\n"
-    '- "global": The query asks about broad themes, movements, genres, or trends '
+    '- "global": The query asks about broad themes, SOCIAL_MOVEMENT, GENRE, or trends '
     "spanning many entities.\n"
     '- "drift": The query requires multi-hop reasoning or following chains of '
     "relationships.\n"
@@ -143,11 +143,12 @@ def homogenize_context(state: State) -> list[dict]:
     for e in entities:
         name = e.get("name", "Unknown")
         desc = e.get("description", "No description")
+        e_type = e.get("type", "Entity")
         raw_akus.append({
-            "content": f"Entity: {name} - {desc}",
+            "content": f"Entity ({e_type}): {name} - {desc}",
             "origin": e.get("origin", "Graph DB"),
             "method": e.get("method", "Entity Search"),
-            "metadata": {"qid": e.get("qid"), "type": "Node", "name": name}
+            "metadata": {"qid": e.get("qid"), "type": e_type, "name": name}
         })
 
     # 2. Process Relationships (Sort by Score)
@@ -167,7 +168,7 @@ def homogenize_context(state: State) -> list[dict]:
             "content": content,
             "origin": r.get("origin", "Graph DB"),
             "method": r.get("method", "Neighborhood Expansion"),
-            "metadata": {"qid": r.get("qid"), "type": "Relationship", "name": f"{source} --[{rel}]--> {target}"}
+            "metadata": {"qid": r.get("qid"), "type": rel, "name": f"{source} --[{rel}]--> {target}"}
         })
 
     # 3. Process Text Chunks (Sort by Score)

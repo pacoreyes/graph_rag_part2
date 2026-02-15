@@ -244,9 +244,9 @@ def test_homogenize_context_sorting_and_indexing():
     # Expected order: Entities (sorted), Relationships, Chunks, Communities, Cypher
     assert len(akus) == 6
     assert akus[0]["index"] == 1
-    assert "Entity: A" in akus[0]["content"]  # Top PageRank
+    assert "Entity (Entity): A" in akus[0]["content"]  # Top PageRank
     assert akus[1]["index"] == 2
-    assert "Entity: B" in akus[1]["content"]
+    assert "Entity (Entity): B" in akus[1]["content"]
     assert akus[2]["index"] == 3
     assert "Relationship: S --[R]--> T" in akus[2]["content"]
     assert akus[3]["index"] == 4
@@ -310,9 +310,9 @@ def test_homogenize_context_sorting_with_none_values():
     akus = homogenize_context(state)
     assert len(akus) == 5
     # Entities sorted: C (1.0), B (0.5), A (None/0)
-    assert "Entity: C" in akus[0]["content"]
-    assert "Entity: B" in akus[1]["content"]
-    assert "Entity: A" in akus[2]["content"]
+    assert "Entity (Entity): C" in akus[0]["content"]
+    assert "Entity (Entity): B" in akus[1]["content"]
+    assert "Entity (Entity): A" in akus[2]["content"]
 
 
 def test_homogenize_context_extreme_values():
@@ -323,7 +323,7 @@ def test_homogenize_context_extreme_values():
         ]
     )
     akus = homogenize_context(state)
-    assert "Entity: Inf" in akus[0]["content"]
+    assert "Entity (Entity): Inf" in akus[0]["content"]
 
 
 def test_homogenize_context_large_dataset():
@@ -333,6 +333,6 @@ def test_homogenize_context_large_dataset():
     akus = homogenize_context(state)
     assert len(akus) == 100
     assert akus[0]["index"] == 1
-    assert "Entity: E99" in akus[0]["content"]
+    assert "Entity (Entity): E99" in akus[0]["content"]
     assert akus[99]["index"] == 100
-    assert "Entity: E0" in akus[99]["content"]
+    assert "Entity (Entity): E0" in akus[99]["content"]

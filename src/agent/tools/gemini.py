@@ -28,7 +28,7 @@ def gemini_embed(
 def gemini_generate(
     client: genai.Client,
     prompt: str,
-    model: str = "models/gemini-2.5-flash",
+    model: str = "models/gemini-2.0-flash",
 ) -> str:
     """Generate text using Google Gemini given a prompt.
 

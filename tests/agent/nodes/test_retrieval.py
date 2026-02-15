@@ -102,10 +102,11 @@ async def test_neighborhood_expand_traverses_entities(mock_kg, mock_neo4j):
             "name": "Ulm",
             "source_id": "e1",
             "source_name": "Einstein",
-            "relationship": "BORN_IN",
+            "relationship": "ORIGINATES_FROM",
             "rel_description": "born in",
             "qid": "Q3012",
-            "score": 0.9
+            "score": 0.9,
+            "type": "ORIGINATES_FROM"
         },
     ]
 
@@ -115,7 +116,7 @@ async def test_neighborhood_expand_traverses_entities(mock_kg, mock_neo4j):
     assert len(result["relationships"]) == 1
     assert result["source_qids"] == ["Q3012"]
     assert result["relationships"][0]["origin"] == "Graph DB"
-    assert result["relationships"][0]["type"] == "Relationship"
+    assert result["relationships"][0]["type"] == "ORIGINATES_FROM"
 
 
 @patch("agent.nodes.retrieval.neo4j_client")

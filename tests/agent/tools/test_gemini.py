@@ -49,7 +49,7 @@ def test_gemini_generate_returns_text():
 
     assert result == "Generated response"
     mock_client.models.generate_content.assert_called_once_with(
-        model="models/gemini-2.5-flash-lite", contents="Say hello"
+        model="models/gemini-2.0-flash", contents="Say hello"
     )
 
 
