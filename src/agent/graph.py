@@ -35,7 +35,7 @@ def route_by_strategy(state: State) -> list[str]:
         list[str]: Node names to execute next.
     """
     if state.strategy == "local" or state.strategy == "drift":
-        return ["entity_search"]
+        return ["entity_search", "nl_to_cypher"]
     if state.strategy == "global":
         return ["community_search"]
     if state.strategy == "structural":
@@ -70,6 +70,34 @@ def route_from_evaluator(state: State) -> str:
     if state.skip_deep_search:
         return "resolve_sources"
     return "chunk_search"
+
+
+def route_from_join(state: State) -> str:
+    """Decide if we skip evaluation for fast track.
+
+    Args:
+        state: Current graph state.
+
+    Returns:
+        str: Next node to execute.
+    """
+    if state.is_fast_track:
+        return "resolve_sources"
+    return "retrieval_evaluator"
+
+
+def route_after_synthesis(state: State) -> str:
+    """Decide if we skip critic for fast track.
+
+    Args:
+        state: Current graph state.
+
+    Returns:
+        str: Next node to execute.
+    """
+    if state.is_fast_track:
+        return END
+    return "answer_critic"
 
 
 async def join_retrieval(state: State) -> dict[str, Any]:
@@ -130,7 +158,15 @@ builder.add_edge("nl_to_cypher", "join_retrieval")
 
 # --- Converge & Surgical Retrieval ---
 # join_retrieval acts as a synchronization barrier
-builder.add_edge("join_retrieval", "retrieval_evaluator")
+builder.add_conditional_edges(
+    "join_retrieval",
+    route_from_join,
+    {
+        "retrieval_evaluator": "retrieval_evaluator",
+        "resolve_sources": "resolve_sources"
+    }
+)
+
 builder.add_conditional_edges(
     "retrieval_evaluator", 
     route_from_evaluator,
@@ -142,7 +178,16 @@ builder.add_conditional_edges(
 
 builder.add_edge("chunk_search", "resolve_sources")
 builder.add_edge("resolve_sources", "synthesize_answer")
-builder.add_edge("synthesize_answer", "answer_critic")
+
+builder.add_conditional_edges(
+    "synthesize_answer",
+    route_after_synthesis,
+    {
+        "answer_critic": "answer_critic",
+        END: END
+    }
+)
+
 builder.add_conditional_edges("answer_critic", route_after_critic)
 
 graph = builder.compile()

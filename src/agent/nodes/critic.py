@@ -1,5 +1,6 @@
 """Critic node for self-correction and answer verification."""
 
+import asyncio
 from typing import Any
 
 import structlog
@@ -53,7 +54,7 @@ async def answer_critic(state: State, config: RunnableConfig) -> dict[str, Any]:
         dict[str, Any]: State update with critique and incremented iteration_count.
     """
     configuration = Configuration.from_runnable_config(config)
-    client = gemini_client.get_client()
+    client = await gemini_client.get_client()
     
     # Get the last AI message (the answer)
     answer = ""
@@ -74,7 +75,10 @@ async def answer_critic(state: State, config: RunnableConfig) -> dict[str, Any]:
         answer=answer
     )
 
-    response_text = gemini_generate(client, prompt, model=configuration.model).strip()
+    response_text = await asyncio.to_thread(
+        gemini_generate, client, prompt, model=configuration.model
+    )
+    response_text = response_text.strip()
     if response_text.startswith("```json"):
         response_text = response_text.replace("```json", "").replace("```", "").strip()
 

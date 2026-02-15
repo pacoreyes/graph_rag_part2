@@ -4,10 +4,35 @@ Pure functions with dependency injection — no global config or singletons.
 """
 
 import json
+import re
 from functools import lru_cache
 from pathlib import Path
 
 from neo4j import AsyncDriver
+
+
+def sanitize_lucene_query(query: str) -> str:
+    """Escape Lucene special characters in a search string.
+
+    Special characters include: + - && || ! ( ) { } [ ] ^ " ~ * ? : \ /
+
+    Args:
+        query: The raw query string from the user.
+
+    Returns:
+        str: Sanitized query string safe for db.index.fulltext.queryNodes.
+    """
+    if not isinstance(query, str):
+        query = str(query)
+    # Escaping special Lucene characters with backslash
+    # Note: We escape the backslash itself first
+    special_chars = r'[+\-&|!(){}\[\]^"~*?:\\]'
+    sanitized = re.sub(special_chars, r'\\\g<0>', query)
+
+    # Handle logical operators if they are literal words
+    sanitized = sanitized.replace(" AND ", " \\AND ").replace(" OR ", " \\OR ").replace(" NOT ", " \\NOT ")
+
+    return sanitized.strip()
 
 
 async def query_knowledge_graph(

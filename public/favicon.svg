@@ -1,0 +1,10 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<svg width="256px" height="256px" viewBox="0 0 256 256" version="1.1" xmlns="http://www.w3.org/2000/svg" xmlns:xlink="http://www.w3.org/1999/xlink">
+    <title>assistant</title>
+    <g id="Page-1" stroke="none" stroke-width="1" fill="none" fill-rule="evenodd">
+        <g id="Group">
+            <circle id="Oval" fill="#1F4AE7" cx="126.5" cy="127.5" r="102.5"></circle>
+            <path d="M240.312625,2.12132034 L253.87868,15.6873753 C255.050253,16.8589482 255.050253,18.7584431 253.87868,19.930016 L19.930016,253.87868 C18.7584431,255.050253 16.8589482,255.050253 15.6873753,253.87868 L2.12132034,240.312625 C0.949747468,239.141052 0.949747468,237.241557 2.12132034,236.069984 L236.069984,2.12132034 C237.241557,0.949747468 239.141052,0.949747468 240.312625,2.12132034 Z" id="Rectangle" fill="#D8D8D8"></path>
+        </g>
+    </g>
+</svg>

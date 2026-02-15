@@ -2,9 +2,29 @@ from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 
-from agent.tools.knowledge_graph import query_knowledge_graph
+from agent.tools.knowledge_graph import (
+    query_knowledge_graph,
+    sanitize_lucene_query,
+)
 
 pytestmark = pytest.mark.anyio
+
+
+def test_sanitize_lucene_query_escapes_special_chars():
+    # Test common special characters
+    raw = 'where is Kraftwerk from?"'
+    sanitized = sanitize_lucene_query(raw)
+    assert 'Kraftwerk from\\?\\"' in sanitized
+
+    # Test Lucene operators
+    raw = 'band (The Cure) + movement'
+    sanitized = sanitize_lucene_query(raw)
+    assert '\\(The Cure\\) \\+ movement' in sanitized
+
+    # Test logical operators
+    raw = 'techno AND germany NOT UK'
+    sanitized = sanitize_lucene_query(raw)
+    assert 'techno \\AND germany \\NOT UK' in sanitized
 
 
 def _make_mock_driver(return_data):

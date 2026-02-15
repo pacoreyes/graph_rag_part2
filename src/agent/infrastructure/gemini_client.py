@@ -1,5 +1,6 @@
 """Google Gemini client manager with dependency injection."""
 
+import asyncio
 from google import genai
 
 
@@ -15,12 +16,12 @@ class GeminiClient:
         self._api_key = api_key
         self._client: genai.Client | None = None
 
-    def get_client(self) -> genai.Client:
+    async def get_client(self) -> genai.Client:
         """Get or lazily initialize the Gemini client.
 
         Returns:
             genai.Client: The Gemini client instance.
         """
         if self._client is None:
-            self._client = genai.Client(api_key=self._api_key)
+            self._client = await asyncio.to_thread(genai.Client, api_key=self._api_key)
         return self._client

@@ -1,0 +1,13 @@
+{
+  "variables": {
+    "dark": {
+      "--primary": "227 79.3% 63.9%",
+      "--primary-foreground": "0 0% 100%"
+    },
+    "light": {
+      "--primary": "227 79.3% 63.9%",
+      "--primary-foreground": "0 0% 100%"
+    }
+  },
+  "version": 3
+}

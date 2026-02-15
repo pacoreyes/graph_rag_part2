@@ -79,7 +79,7 @@ async def on_message(message: cl.Message) -> None:
 
             # Update the same step instead of creating new ones
             active_step.name = f"Executing: {node_name}"
-            
+
             if node_name == "planner":
                 active_step.output = f"Thought: {state_update.get('plan', 'unknown')}"
             elif node_name == "entity_search":
@@ -116,5 +116,5 @@ async def on_message(message: cl.Message) -> None:
     # Keep history in sync with the full sequence of messages
     cl.user_session.set("history", full_history)
 
-    await cl.Message(content=final_reply).send()
+    await cl.Message(content=final_reply, author="Assistant").send()
     logger.info("response_sent", reply_length=len(final_reply))

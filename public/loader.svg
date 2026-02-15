@@ -1,0 +1,32 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<svg width="256px" height="256px" viewBox="0 0 256 256" version="1.1" xmlns="http://www.w3.org/2000/svg" xmlns:xlink="http://www.w3.org/1999/xlink">
+    <title>Assistant Loader</title>
+    <defs>
+        <linearGradient id="spinningBlueGradient" x1="0%" y1="0%" x2="100%" y2="100%">
+            <stop offset="0%" stop-color="#1F4AE7"></stop>
+            <stop offset="100%" stop-color="#6B8BFF"></stop> <animateTransform
+                attributeName="gradientTransform"
+                type="rotate"
+                from="0 0.5 0.5"
+                to="360 0.5 0.5"
+                dur="1.5s"
+                repeatCount="indefinite" />
+        </linearGradient>
+    </defs>
+
+    <g id="Loader-Group" stroke="none" stroke-width="1" fill="none" fill-rule="evenodd">
+
+        <circle id="Inner-Ball" fill="url(#spinningBlueGradient)" cx="126.5" cy="127.5" r="102.5"></circle>
+
+        <circle id="Outer-Arc" cx="126.5" cy="127.5" r="118" stroke="#D8D8D8" stroke-width="8" stroke-linecap="round" stroke-dasharray="550 250">
+
+            <animateTransform
+                attributeName="transform"
+                type="rotate"
+                from="0 126.5 127.5"
+                to="360 126.5 127.5"
+                dur="2.5s"
+                repeatCount="indefinite"/>
+        </circle>
+    </g>
+</svg>

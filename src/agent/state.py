@@ -24,6 +24,7 @@ class State:
 
     # Reasoning and Loop management
     plan: str = ""
+    is_fast_track: bool = False
     critique: str = ""
     iteration_count: int = 0
     
@@ -47,6 +48,9 @@ class State:
     relationships: Annotated[list[dict], operator.add] = field(default_factory=list)
     community_reports: Annotated[list[dict], operator.add] = field(default_factory=list)
     chunk_evidence: Annotated[list[dict], operator.add] = field(default_factory=list)
+
+    # Homogenized Atomic Knowledge Units for USA Framework
+    akus: list[dict] = field(default_factory=list)
 
     # Source tracking
     source_qids: Annotated[list[str], operator.add] = field(default_factory=list)

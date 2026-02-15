@@ -4,6 +4,7 @@ Handles queries requiring precise database lookups, counts, or lists.
 Uses EXPLAIN for validation and error-feedback loops.
 """
 
+import asyncio
 from pathlib import Path
 from typing import Any
 
@@ -19,6 +20,20 @@ from agent.tools.knowledge_graph import format_schema_for_prompt, query_knowledg
 
 logger = structlog.get_logger()
 
+def _get_query_text(message: Any) -> str:
+    """Extract string content from a message, handling list-of-blocks format."""
+    content = message.content
+    if isinstance(content, str):
+        return content
+    if isinstance(content, list):
+        for block in content:
+            if isinstance(block, dict) and block.get("type") == "text":
+                return block.get("text", "")
+            if isinstance(block, str):
+                return block
+    return str(content)
+
+
 STRUCTURAL_CYPHER_PROMPT = """You are an expert Neo4j Cypher developer for a music GraphRAG system.
 SCHEMA:
 {schema}
@@ -29,6 +44,7 @@ GUIDELINES:
 1. Use ONLY the node labels and properties provided in the schema.
 2. For entity lookups (Artists, Bands, Genres, Countries), ALWAYS prioritize using the FullText index:
    Example: CALL db.index.fulltext.queryNodes('entityNameIndex', 'techno') YIELD node AS g
+   IMPORTANT: When using db.index.fulltext.queryNodes, ensure the search term is just the keywords (e.g., 'Kraftwerk' instead of 'where is Kraftwerk from?'). DO NOT include punctuation like '?' or trailing quotes inside the search string.
 3. For lists of items, always use 'DISTINCT' and always return 'name', 'type', and 'qid' if available.
 4. For counting queries, return a field named 'count'.
 5. PRECISION FIRST: Favor direct relationships (e.g., -[:HAS_GENRE]->) initially. Only use variable-length paths (e.g., *1..2) in your retry attempt if the direct match returned 0 results.
@@ -53,9 +69,9 @@ async def nl_to_cypher(state: State, config: RunnableConfig) -> dict[str, Any]:
         dict[str, Any]: State update with cypher results, entities, or errors.
     """
     configuration = Configuration.from_runnable_config(config)
-    client = gemini_client.get_client()
-    driver = neo4j_client.get_driver()
-    query_text = state.messages[-1].content
+    client = await gemini_client.get_client()
+    driver = await neo4j_client.get_driver()
+    query_text = _get_query_text(state.messages[-1])
     schema_path = Path(settings.data_volume_path) / "graph_schema.json"
     schema = format_schema_for_prompt(schema_path)
 
@@ -69,7 +85,10 @@ async def nl_to_cypher(state: State, config: RunnableConfig) -> dict[str, Any]:
             query=query_text, 
             error_context=error_context
         )
-        cypher_response = gemini_generate(client, prompt, model=configuration.model).strip()
+        cypher_response = await asyncio.to_thread(
+            gemini_generate, client, prompt, model=configuration.model
+        )
+        cypher_response = cypher_response.strip()
         
         # Clean markdown
         if "```cypher" in cypher_response:

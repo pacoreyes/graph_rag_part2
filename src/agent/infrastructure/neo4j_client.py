@@ -19,15 +19,17 @@ class Neo4jClient:
         self._password = password
         self._drivers: dict[int, AsyncDriver] = {}
 
-    def get_driver(self) -> AsyncDriver:
+    async def get_driver(self) -> AsyncDriver:
         """Get or lazily initialize the Neo4j async driver for current loop.
 
         Returns:
             AsyncDriver: The Neo4j async driver instance.
         """
-        loop_id = id(asyncio.get_event_loop())
+        loop = asyncio.get_event_loop()
+        loop_id = id(loop)
         if loop_id not in self._drivers:
-            self._drivers[loop_id] = AsyncGraphDatabase.driver(
+            self._drivers[loop_id] = await asyncio.to_thread(
+                AsyncGraphDatabase.driver,
                 self._uri,
                 auth=(self._username, self._password),
                 max_connection_lifetime=300,

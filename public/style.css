@@ -1,32 +1,39 @@
-/* Overriding the primary color variables */
-:root {
-    --primary-main: #ffffff !important;
-    --primary-main-v2: #ffffff !important;
+/* Target the loading ring container */
+.cl-loading-ring {
+    /* Hide the default spinning border */
+    border: none !important;
+    border-top: none !important;
+    animation: none !important;
+
+    /* Set your custom SVG as the background */
+    background-image: url('/public/loader.svg');
+    background-size: contain;
+    background-repeat: no-repeat;
+    background-position: center;
+
+    /* Adjust size if necessary to match your SVG dimensions */
+    width: 40px;
+    height: 40px;
 }
 
-/* 
-Target the submit button by every possible selector.
-Chainlit uses 'bg-primary' which is usually the pink color.
-*/
-
-button[type="submit"],
-.bg-primary,
-[data-testid="submit-button"],
-.watermark + div button {
-    background-color: #ffffff !important;
-    background: #ffffff !important;
-    color: #000000 !important;
+/* Ensure the internal div of the loader doesn't interfere */
+.cl-loading-ring div {
+    display: none;
 }
 
-/* The arrow icon inside the button */
-button[type="submit"] svg,
-.bg-primary svg,
-[data-testid="submit-button"] svg {
-    fill: #000000 !important;
-    color: #000000 !important;
+/* Add vertical breathing room to the horizontal separator in messages */
+div[data-orientation="horizontal"].bg-border {
+    margin-top: 2rem !important;
+    margin-bottom: 1rem !important;
 }
 
-/* Force black color for text if it's a text button */
-button[type="submit"] span {
-    color: #000000 !important;
+/* Force any accidental headers to normal size to prevent UI ballooning */
+.text-3xl {
+    font-size: 1rem !important;
+    font-weight: 100 !important;
+    line-height: 1.6em !important;
+    margin: 0 !important;
+}
+div.prose {
+    line-height: 1.6em !important;
 }

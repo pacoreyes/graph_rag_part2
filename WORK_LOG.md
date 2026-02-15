@@ -70,3 +70,33 @@ Refine the GraphRAG agent based on the pipeline agent's architectural feedback, 
 ### Data Ingestion Status
 - **community-summaries**: 100% (18,912 vectors).
 - **chunks**: In progress (~131 vectors and climbing). `chunk_search` is wired and will scale automatically.
+
+---
+
+## 2026-02-14 — Implementation of the USA (Unified Sequential Attribution) Framework
+
+### Goal
+Eliminate "Attribution Drift" and ensure 100% infrastructure transparency by shifting from post-hoc citations to Indexed In-Context Attribution (IICA) grounded in a unified context list.
+
+### Changes
+
+| Action | File | Description |
+|--------|------|-------------|
+| EDIT | `src/agent/state.py` | Added `akus` (Atomic Knowledge Units) field to state for unified context management. |
+| EDIT | `src/agent/nodes/retrieval.py` | Updated all retrieval nodes to inject `origin` (Graph/Vector DB) and `method` (Search/Expansion/Summary) metadata. |
+| EDIT | `src/agent/nodes/generation.py` | Implemented `homogenize_context` utility for deterministic sorting and indexing. Refined `SYNTHESIS_PROMPT` with mandatory "Attention Pinning" and "Truth Hierarchy" rules. Integrated `_resolve_aku_legend` for automated source mapping and `_check_faithfulness` for density validation. |
+| EDIT | `tests/agent/nodes/test_generation.py` | Added exhaustive tests for AKU homogenization, sorting robustness (`None` handling), legend resolution, and faithfulness heuristics. |
+| EDIT | `tests/agent/nodes/test_retrieval.py` | Updated retrieval tests to verify the presence of origin metadata across all search types. |
+
+### Architecture Decisions
+
+- **Atomic Knowledge Units (AKUs)** — Homogenized disparate retrieval results (nodes, edges, chunks, reports) into a single sequential list. This forces the LLM's attention heads to align generated tokens with specific, addressable context blocks.
+- **Unified Sequential Citations `[1], [2], [3]`** — Adopted academic-style numerical citations for better UX, removing non-intuitive markers like `[T3]` or `[E1]`.
+- **Infrastructure Transparency** — Every citation in the final legend now explicitly states its origin (Neo4j vs. Pinecone) and the retrieval method used, providing a clear "System of Record" for every fact.
+- **Truth Hierarchy** — Formalized reasoning rules that prioritize structured "Graph DB" facts over descriptive "Vector DB" chunks when contradictions arise.
+- **Self-Correcting Attribution** — Implemented an LLM-level "Self-Audit" instruction and a code-level "Faithfulness Heuristic" to detect and prevent hallucinated citations or low-density attribution.
+
+### Verification Results
+- **Unit Tests**: 20/20 generation tests and 11/11 retrieval tests passed. 
+- **Sorting Robustness**: Verified that `None` values in PageRank or Similarity scores are correctly handled as `0` without crashing.
+- **Hallucination Detection**: Heuristic correctly flags indices cited by the model that don't exist in the provided context.

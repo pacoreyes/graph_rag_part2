@@ -23,6 +23,7 @@ dependencies = [
     "transformers>=4.40.0",
     "einops>=0.8.2",
     "langgraph-cli[inmem]",
+    "langgraph-api>=0.7.36",
 ]
 
 

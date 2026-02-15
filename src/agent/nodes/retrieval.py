@@ -4,6 +4,7 @@ Each function is a LangGraph node that performs one step in
 the multi-strategy retrieval pipeline (Local / Global / Hybrid).
 """
 
+import asyncio
 import math
 from typing import Any
 
@@ -19,7 +20,10 @@ from agent.infrastructure.clients import (
 from agent.settings import settings
 from agent.state import State
 from agent.tools.embeddings import nomic_embed
-from agent.tools.knowledge_graph import query_knowledge_graph
+from agent.tools.knowledge_graph import (
+    query_knowledge_graph,
+    sanitize_lucene_query,
+)
 from agent.tools.source_resolver import resolve_source_urls
 from agent.tools.vector_store import pinecone_embed, vector_search
 
@@ -76,6 +80,21 @@ COMMUNITY_MEMBERS_L2 = (
 )
 
 
+def _get_query_text(message: Any) -> str:
+    """Extract string content from a message, handling list-of-blocks format."""
+    content = message.content
+    if isinstance(content, str):
+        return content
+    if isinstance(content, list):
+        # Extract text from the first text block found
+        for block in content:
+            if isinstance(block, dict) and block.get("type") == "text":
+                return block.get("text", "")
+            if isinstance(block, str):
+                return block
+    return str(content)
+
+
 async def embed_query(state: State, config: RunnableConfig) -> dict[str, Any]:
     """Compute Nomic embedding (384-dim) for the user query.
 
@@ -88,10 +107,10 @@ async def embed_query(state: State, config: RunnableConfig) -> dict[str, Any]:
     """
     _ = config
     last_message = state.messages[-1]
-    query_text = last_message.content
+    query_text = _get_query_text(last_message)
 
-    model = nomic_client.get_model()
-    tokenizer = nomic_client.get_tokenizer()
+    model = await nomic_client.get_model()
+    tokenizer = await nomic_client.get_tokenizer()
     # Use 384 dimensions for Neo4j vector indexes compatibility
     embedding = nomic_embed(model, tokenizer, query_text, dimensions=384)
 
@@ -111,14 +130,15 @@ async def entity_search(state: State, config: RunnableConfig) -> dict[str, Any]:
     """
     configuration = Configuration.from_runnable_config(config)
     last_message = state.messages[-1]
-    query_text = last_message.content
-    driver = neo4j_client.get_driver()
+    query_text = _get_query_text(last_message)
+    driver = await neo4j_client.get_driver()
 
-    # 1. Fulltext search
+    # 1. Fulltext search (sanitized for Lucene)
+    sanitized_query = sanitize_lucene_query(query_text)
     ft_results = await query_knowledge_graph(
         ENTITY_FULLTEXT_SEARCH,
         driver=driver,
-        parameters={"query": query_text, "limit": configuration.retrieval_k},
+        parameters={"query": sanitized_query, "limit": configuration.retrieval_k},
     )
 
     # 2. Vector search (requires query_embedding from embed_query node)
@@ -160,6 +180,10 @@ async def entity_search(state: State, config: RunnableConfig) -> dict[str, Any]:
 
         seen_ids.add(eid)
         seen_names[name] = pagerank
+        # Add origin metadata for USA Framework
+        row["origin"] = "Graph DB"
+        row["method"] = "Entity Search (Fulltext/Vector)"
+        row["type"] = "Node"
         entities.append(row)
         if row.get("qid"):
             qids.append(row["qid"])
@@ -191,7 +215,7 @@ async def neighborhood_expand(state: State, config: RunnableConfig) -> dict[str,
         dict[str, Any]: Partial state with relationships and source_qids.
     """
     configuration = Configuration.from_runnable_config(config)
-    driver = neo4j_client.get_driver()
+    driver = await neo4j_client.get_driver()
     limit_per_entity = configuration.retrieval_k
     max_depth = configuration.neighborhood_depth
 
@@ -227,7 +251,12 @@ async def neighborhood_expand(state: State, config: RunnableConfig) -> dict[str,
                     max_rel_score = results[0].get("score", 0)
                     if score < max_rel_score * 0.8:
                         continue
-
+                
+                # Add origin metadata for USA Framework
+                row["origin"] = "Graph DB"
+                row["method"] = "Neighborhood Expansion (DRIFT)"
+                row["type"] = "Relationship"
+                
                 all_relationships.append(row)
                 if row.get("qid"):
                     all_qids.append(row["qid"])
@@ -265,11 +294,11 @@ async def chunk_search(state: State, config: RunnableConfig) -> dict[str, Any]:
         dict[str, Any]: Partial state with chunk_evidence.
     """
     configuration = Configuration.from_runnable_config(config)
-    client = pinecone_client.get_client()
+    client = await pinecone_client.get_client()
     query_text = state.messages[-1].content
 
     # Generate Llama embedding explicitly (1024-dim)
-    query_vector = pinecone_embed(client, query_text)
+    query_vector = await asyncio.to_thread(pinecone_embed, client, query_text)
 
     # 1. Build Multi-Factor Filter
     filters = []
@@ -307,7 +336,8 @@ async def chunk_search(state: State, config: RunnableConfig) -> dict[str, Any]:
         filter_dict = {"entity_type": {"$in": state.target_entity_types}}
 
     # 2. Vector search with Surgical Filtering
-    response = vector_search(
+    response = await asyncio.to_thread(
+        vector_search,
         client=client,
         index_name=settings.pinecone_index_chunks_name,
         query_vector=query_vector,
@@ -318,7 +348,8 @@ async def chunk_search(state: State, config: RunnableConfig) -> dict[str, Any]:
     # Fallback: if filtered search returned nothing, try open search
     if not response.get("matches") and filter_dict is not None:
         logger.warning("chunk_search_fallback", reason="no_filtered_results", filter=filter_dict)
-        response = vector_search(
+        response = await asyncio.to_thread(
+            vector_search,
             client=client,
             index_name=settings.pinecone_index_chunks_name,
             query_vector=query_vector,
@@ -329,6 +360,7 @@ async def chunk_search(state: State, config: RunnableConfig) -> dict[str, Any]:
     # 3. Authority-Led Re-ranking (Anchor Retrieval)
     matches = response.get("matches", [])
     chunks = []
+    qids = []
     for match in matches:
         metadata = match.get("metadata", {})
         score = match["score"]
@@ -338,15 +370,22 @@ async def chunk_search(state: State, config: RunnableConfig) -> dict[str, Any]:
         pagerank = float(metadata.get("pagerank", 0))
         boosted_score = score * math.log1p(pagerank)
         
+        article_id = metadata.get("article_id", "")
+        if article_id:
+            qids.append(article_id)
+
         chunks.append({
             "id": match["id"],
             "score": boosted_score,
             "raw_score": score,
             "text": metadata.get("text", ""),
-            "article_id": metadata.get("article_id", ""),
+            "article_id": article_id,
             "entity_type": metadata.get("entity_type", ""),
             "community_id": metadata.get("community_id", ""),
-            "pagerank": pagerank
+            "pagerank": pagerank,
+            "origin": "Vector DB",
+            "method": "Surgical Search",
+            "type": "Text Chunk"
         })
 
     # Sort by boosted score and limit to retrieval_k
@@ -354,7 +393,7 @@ async def chunk_search(state: State, config: RunnableConfig) -> dict[str, Any]:
     chunks = chunks[:configuration.retrieval_k]
 
     logger.info("chunk_search_done", count=len(chunks), filter=bool(filter_dict))
-    return {"chunk_evidence": chunks}
+    return {"chunk_evidence": chunks, "source_qids": qids}
 
 
 async def community_search(state: State, config: RunnableConfig) -> dict[str, Any]:
@@ -368,11 +407,11 @@ async def community_search(state: State, config: RunnableConfig) -> dict[str, An
         dict[str, Any]: Partial state with community_reports.
     """
     configuration = Configuration.from_runnable_config(config)
-    client = pinecone_client.get_client()
+    client = await pinecone_client.get_client()
     query_text = state.messages[-1].content
 
     # Generate Llama embedding explicitly (1024-dim)
-    query_vector = pinecone_embed(client, query_text)
+    query_vector = await asyncio.to_thread(pinecone_embed, client, query_text)
 
     # Multi-level search: if level is 2, also fetch some from level 1 for more detail
     levels_to_search = [configuration.community_level]
@@ -382,7 +421,8 @@ async def community_search(state: State, config: RunnableConfig) -> dict[str, An
     all_reports = []
     for level in levels_to_search:
         filter_dict = {"level": {"$eq": level}}
-        response = vector_search(
+        response = await asyncio.to_thread(
+            vector_search,
             client=client,
             index_name=settings.pinecone_index_community_summaries,
             query_vector=query_vector,
@@ -397,6 +437,9 @@ async def community_search(state: State, config: RunnableConfig) -> dict[str, An
                 "title": match.get("metadata", {}).get("title", ""),
                 "community_id": match.get("metadata", {}).get("community_id", ""),
                 "level": match.get("metadata", {}).get("level", ""),
+                "origin": "Vector DB",
+                "method": f"Community Summary (Leiden Level {match.get('metadata', {}).get('level', '')})",
+                "type": "Thematic Summary"
             }
             for match in response.get("matches", [])
         ])
@@ -418,7 +461,7 @@ async def community_members_search(
         dict[str, Any]: Partial state with entities and source_qids.
     """
     _ = config
-    driver = neo4j_client.get_driver()
+    driver = await neo4j_client.get_driver()
 
     all_entities: list[dict] = []
     qids: list[str] = []
@@ -442,6 +485,11 @@ async def community_members_search(
             driver=driver,
             parameters={"community_id": community_id},
         )
+        for row in results:
+            row["origin"] = "Graph DB"
+            row["method"] = f"Community Discovery (L{level})"
+            row["type"] = "Node"
+            
         all_entities.extend(results)
         for row in results:
             if row.get("qid"):
@@ -463,7 +511,7 @@ async def resolve_sources(state: State, config: RunnableConfig) -> dict[str, Any
     """
     _ = config
     parquet_path = f"{settings.data_volume_path}/wikipedia_articles.parquet"
-    urls = resolve_source_urls(state.source_qids, parquet_path)
+    urls = await asyncio.to_thread(resolve_source_urls, state.source_qids, parquet_path)
 
     logger.info("resolve_sources_done", count=len(urls))
     return {"source_urls": urls}

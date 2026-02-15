@@ -1,5 +1,6 @@
 """Pinecone client manager with dependency injection."""
 
+import asyncio
 from pinecone import Pinecone
 
 
@@ -15,12 +16,12 @@ class PineconeClient:
         self._api_key = api_key
         self._client: Pinecone | None = None
 
-    def get_client(self) -> Pinecone:
+    async def get_client(self) -> Pinecone:
         """Get or lazily initialize the Pinecone client.
 
         Returns:
             Pinecone: The Pinecone client instance.
         """
         if self._client is None:
-            self._client = Pinecone(api_key=self._api_key)
+            self._client = await asyncio.to_thread(Pinecone, api_key=self._api_key)
         return self._client

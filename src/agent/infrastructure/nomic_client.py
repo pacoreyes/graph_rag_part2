@@ -1,5 +1,6 @@
 """Nomic embedding model manager with dependency injection."""
 
+import asyncio
 from transformers import AutoModel, AutoTokenizer, PreTrainedModel, PreTrainedTokenizer
 
 
@@ -16,27 +17,27 @@ class NomicClient:
         self._model: PreTrainedModel | None = None
         self._tokenizer: PreTrainedTokenizer | None = None
 
-    def get_model(self) -> PreTrainedModel:
+    async def get_model(self) -> PreTrainedModel:
         """Get or lazily initialize the Nomic model.
 
         Returns:
             PreTrainedModel: The Nomic model in eval mode.
         """
         if self._model is None:
-            self._model = AutoModel.from_pretrained(
-                self._model_name, trust_remote_code=True
+            self._model = await asyncio.to_thread(
+                AutoModel.from_pretrained, self._model_name, trust_remote_code=True
             )
             self._model.eval()
         return self._model
 
-    def get_tokenizer(self) -> PreTrainedTokenizer:
+    async def get_tokenizer(self) -> PreTrainedTokenizer:
         """Get or lazily initialize the Nomic tokenizer.
 
         Returns:
             PreTrainedTokenizer: The Nomic tokenizer.
         """
         if self._tokenizer is None:
-            self._tokenizer = AutoTokenizer.from_pretrained(
-                self._model_name, trust_remote_code=True
+            self._tokenizer = await asyncio.to_thread(
+                AutoTokenizer.from_pretrained, self._model_name, trust_remote_code=True
             )
         return self._tokenizer

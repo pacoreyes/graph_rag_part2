@@ -5,5 +5,13 @@
     "agent": "./src/agent/graph.py:graph"
   },
   "env": ".env",
+  "python_path": ["src"],
+  "watch_ignore": [
+    "**/__pycache__/**",
+    "**/.venv/**",
+    "**/.git/**",
+    "**/.idea/**",
+    "**/.ruff_cache/**"
+  ],
   "image_distro": "wolfi"
 }

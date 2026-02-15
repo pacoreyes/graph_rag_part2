@@ -1,5 +1,6 @@
 """Evaluator node to assess retrieval quality and prune context noise."""
 
+import asyncio
 from typing import Any
 
 import structlog
@@ -50,7 +51,7 @@ async def retrieval_evaluator(state: State, config: RunnableConfig) -> dict[str,
         dict[str, Any]: State update with retrieval_guide and skip_deep_search flag.
     """
     configuration = Configuration.from_runnable_config(config)
-    client = gemini_client.get_client()
+    client = await gemini_client.get_client()
     query_text = state.messages[-1].content
 
     # Summarize data for the prompt
@@ -64,7 +65,10 @@ async def retrieval_evaluator(state: State, config: RunnableConfig) -> dict[str,
         community_count=len(state.community_reports)
     )
 
-    response_text = gemini_generate(client, prompt, model=configuration.model).strip()
+    response_text = await asyncio.to_thread(
+        gemini_generate, client, prompt, model=configuration.model
+    )
+    response_text = response_text.strip()
     if response_text.startswith("```json"):
         response_text = response_text.replace("```json", "").replace("```", "").strip()
 
