@@ -61,68 +61,93 @@ def resolve_aku_legend(
 ) -> tuple[str, str]:
     """Build a structured legend and re-index citations sequentially.
     
+    Handles both single [1] and grouped [1, 2] citations.
+    
     Args:
-        answer: The generated answer text containing raw citations like [12].
-        akus: List of AKU dictionaries used for context.
-        source_urls: Dictionary mapping QIDs to source info.
-        llm_evidence: Optional dictionary mapping indices to LLM-generated evidence summaries.
+        answer: The generated answer text.
+        akus: List of AKU dictionaries.
+        source_urls: Mapping of QIDs to source info.
+        llm_evidence: Optional explanation mapping.
         
     Returns:
-        tuple[str, str]: The updated answer with re-indexed citations, and the legend string.
+        tuple[str, str]: The updated answer and legend string.
     """
-    raw_citations = re.findall(r"\[(\d+)\]", answer)
-    if not raw_citations: return answer, ""
-
-    raw_to_new, new_idx = {}, 1
-    # We use a dict to preserve order and uniqueness of citations found in text
-    citation_order = []
-    for raw in raw_citations:
-        if raw not in raw_to_new:
-            raw_to_new[raw] = str(new_idx)
-            new_idx += 1
-            citation_order.append(raw)
-
-    # Replace citations in the text
-    updated_answer = re.sub(r"\[(\d+)\]", lambda m: f"[{raw_to_new[m.group(1)]}]", answer)
+    # 1. Find all citation blocks like [1], [1, 2], [1, 3, 5]
+    # We use a placeholder replacement strategy to avoid messing up indices during replacement
     
+    citation_pattern = re.compile(r"\[([\d,\s]+)\]")
+    
+    raw_to_new = {}
+    new_idx = 1
+    citation_order = [] # List of raw IDs in order of first appearance
+
+    def replacement_handler(match):
+        nonlocal new_idx
+        content = match.group(1)
+        # Split by comma, strip whitespace
+        raw_ids = [s.strip() for s in content.split(",") if s.strip().isdigit()]
+        
+        if not raw_ids:
+            return match.group(0) # Return original if no valid numbers
+            
+        new_ids = []
+        for raw in raw_ids:
+            if raw not in raw_to_new:
+                raw_to_new[raw] = str(new_idx)
+                new_idx += 1
+                citation_order.append(raw)
+            new_ids.append(raw_to_new[raw])
+            
+        return f"[{', '.join(new_ids)}]"
+
+    updated_answer = citation_pattern.sub(replacement_handler, answer)
+    
+    if not raw_to_new:
+        return answer, ""
+
+    # 2. Build the legend
     aku_map = {str(aku["index"]): aku for aku in akus}
-    legend_lines = ["---", "**Sources & Evidence Path:**"]
-    
-    # Build legend based on the order they appear (re-indexed 1, 2, 3...)
-    # The 'raw_to_new' values are '1', '2', '3'... so we can just iterate 1..new_idx-1
-    # But we need to map back to the original raw ID to find the AKU.
-    # We can iterate through our 'citation_order' which has the raw IDs in appearance order.
+    legend_lines = ["\n---", "**Sources & Evidence Path:**"]
     
     for idx, raw in enumerate(citation_order, 1):
-        seq = str(idx) # This matches raw_to_new[raw]
+        seq = str(idx)
         aku = aku_map.get(raw)
         if not aku: continue
         
         metadata = aku.get("metadata", {})
         qid = metadata.get("qid") or metadata.get("article_id")
-        # In a real graph, we'd look up the URL. For now, we use a placeholder or check source_urls.
         source_info = source_urls.get(qid) if qid and source_urls else None
         
         origin = aku.get("origin", "Unknown")
         method = aku.get("method", "Unknown")
         
-        # Determine the label for the legend entry
+        # Determine the label
         content_label = ""
         if llm_evidence and raw in llm_evidence:
             content_label = llm_evidence[raw]
-        elif metadata.get("name"):
-            content_label = metadata["name"]
-        else:
-            # Fallback to a snippet of content
-            snippet = aku['content']
-            if ": " in snippet:
-                snippet = snippet.split(": ", 1)[-1]
-            content_label = f"{snippet[:120]}..." if len(snippet) > 120 else snippet
-
+        
         # Build the line
         line_parts = [f"- `[{seq}]`"]
         
-        # Add link if available
+        if origin == "Vector DB":
+            # For text chunks, prefer the explanation or a snippet
+            if not content_label:
+                snippet = aku['content']
+                if ": " in snippet:
+                    snippet = snippet.split(": ", 1)[-1]
+                content_label = f"{snippet[:120]}..." if len(snippet) > 120 else snippet
+            line_parts.append(f'"{content_label}"')
+        else:
+            # For Graph DB, show the structural name (Triple) AND the explanation if available
+            name = metadata.get("name")
+            if not name:
+                 name = aku['content'][:120] + "..."
+            
+            if content_label:
+                line_parts.append(f"{name} ({content_label})")
+            else:
+                line_parts.append(f"{name}")
+
         if source_info:
             name = source_info.get("name", "Source")
             url = source_info.get("wikipedia_url")
@@ -133,15 +158,13 @@ def resolve_aku_legend(
         else:
             line_parts.append(f"{content_label}")
 
-        # Add metadata
         if metadata.get("chunk_id"):
              line_parts.append(f"| ID: {metadata['chunk_id']}")
         
         line_parts.append(f"| Origin: {origin} | Method: {method}")
-        
         legend_lines.append(" ".join(line_parts))
 
-    return updated_answer, "".join(legend_lines)
+    return updated_answer, "\n".join(legend_lines)
 
 
 def check_faithfulness(answer: str, akus: list[dict]) -> dict[str, str | bool | None]:

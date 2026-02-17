@@ -56,15 +56,26 @@ SYNTHESIS_PROMPT = (
     "original source text, and the underlying graph schema.\n\n"
     "UNIFIED CONTEXT (Atomic Knowledge Units):\n"
     "{akus}\n\n"
+    "CRITICAL: REVIEW THE CRITIQUE FROM PREVIOUS ATTEMPT (if any):\n"
+    "{critique}\n\n"
     "RETRIEVAL GUIDE (Instructions for focus):\n"
     "{guide}\n\n"
     "Using the above, answer the user's question: {query}\n\n"
     "Guidelines:\n"
-    "1. ATTENTION PINNING: Every claim MUST be immediately followed by the relevant index(es) in brackets (e.g., [1] or [1][3]).\n"
-    "2. CONSOLIDATION: If you have a long list of similar facts, summarize them and cite a representative sample (max 5 indices).\n"
-    "3. TRUTH HIERARCHY: Prioritize AKUs from 'Graph DB' for structural facts and 'Vector DB' for descriptive context.\n"
-    "4. VERBATIM EVIDENCE: For every 'Vector DB' AKU you cite, you MUST provide a verbatim quote from its text to prove the claim.\n"
-    "5. CLEAN SYNTHESIS: Provide the answer in plain text without markdown headers or links."
+    "1. CROSS-VERIFICATION (TRIANGULATION): Use 'Graph DB' facts as your primary structure, but verify them against 'Vector DB' text evidence. If they conflict, favor the text evidence and explain why.\n"
+    "2. THEMATIC FRAMING: Start with a high-level summary using the 'Thematic Summary' AKUs if available.\n"
+    "3. ATTENTION PINNING: Cite your sources using the [N] format inline.\n"
+    "4. EXPLANATORY CITATIONS: In your JSON response, the 'evidence' field MUST explain WHY each source was used (e.g., 'Used to identify genre context').\n"
+    "5. FORMAT: Return a JSON object with 'answer' and 'evidence' (a list of objects with 'index' and 'content' explaining the usage).\n"
+    "6. JSON RESPONSE FORMAT:\n"
+    "{{\n"
+    '  "answer": "Your synthesis with [N] citations...",\n'
+    '  "evidence": [\n'
+    '     {{"index": 1, "content": "Explanation for AKU 1 usage"}},\n'
+    '     {{"index": 2, "content": "Explanation for AKU 2 usage"}}\n'
+    '  ]\n'
+    "}}\n\n"
+    "Respond with ONLY the JSON object."
 )
 
 
@@ -108,7 +119,12 @@ def homogenize_context(state: State) -> list[dict]:
             "origin": r.get("origin", "Graph DB"),
             "method": r.get("method", "Neighborhood Expansion"),
             "raw_relevance_score": r.get("score", 0.5),
-            "metadata": {"qid": r.get("qid"), "type": rel, "mention_count": r.get("mention_count", 0)}
+            "metadata": {
+                "qid": r.get("qid"), 
+                "type": rel, 
+                "mention_count": r.get("mention_count", 0),
+                "name": f"{source} --[{rel}]--> {target}"
+            }
         })
 
     # 3. Process Text Chunks
@@ -279,7 +295,12 @@ async def synthesize_answer(state: State, config: RunnableConfig) -> dict[str, A
     akus = homogenize_context(state)
     
     system_instruction = gemini_client.get_schema_instruction()
-    prompt = SYNTHESIS_PROMPT.format(akus=_format_akus_for_prompt(akus), guide=state.retrieval_guide, query=query_text)
+    prompt = SYNTHESIS_PROMPT.format(
+        akus=_format_akus_for_prompt(akus), 
+        critique=state.critique or "No critique.", 
+        guide=state.retrieval_guide, 
+        query=query_text
+    )
     
     response = await asyncio.to_thread(
         gemini_generate, 
@@ -293,6 +314,7 @@ async def synthesize_answer(state: State, config: RunnableConfig) -> dict[str, A
 
     if isinstance(response, SynthesisResponse):
         answer = response.answer
+        # Map EvidenceItem list to a dict for the resolver
         evidence = {str(item.index): item.content for item in response.evidence}
     elif isinstance(response, dict):
         answer = response.get("answer", "")
@@ -301,8 +323,9 @@ async def synthesize_answer(state: State, config: RunnableConfig) -> dict[str, A
     else:
         answer, evidence = str(response), {}
 
-    _ = check_faithfulness(answer, akus) # Result logged or used if needed
+    _ = check_faithfulness(answer, akus)
     updated_answer, legend = resolve_aku_legend(answer, akus, state.source_urls, llm_evidence=evidence)
     final_answer = updated_answer + legend
+    
     logger.info("synthesize_answer_done", length=len(final_answer), aku_count=len(akus))
     return {"messages": [AIMessage(content=final_answer)], "akus": akus}
