@@ -1,20 +1,15 @@
 # -----------------------------------------------------------
 # GraphRAG system built with Agentic Reasoning
 # Structural expert node for NL-to-Cypher translation.
+# Handles queries requiring precise database lookups, counts, or lists.
+# Uses EXPLAIN for validation and error-feedback loops.
 #
 # (C) 2025-2026 Juan-Francisco Reyes, Cottbus, Germany
 # Released under MIT License
 # email pacoreyes@protonmail.com
 # -----------------------------------------------------------
 
-"""Structural expert node for NL-to-Cypher translation.
-
-Handles queries requiring precise database lookups, counts, or lists.
-Uses EXPLAIN for validation and error-feedback loops.
-"""
-
 import asyncio
-import json
 from typing import Any
 
 import structlog
@@ -104,7 +99,7 @@ async def nl_to_cypher(state: State, config: RunnableConfig) -> dict[str, Any]:
             clean_query = response.get("cypher", "").strip()
         else:
             logger.warning("nl_to_cypher_parse_failed", raw=response)
-            clean_query = str(response).strip() # Fallback
+            clean_query = str(response).strip()  # Fallback
 
         logger.info("nl_to_cypher_validate", attempt=attempt, query=clean_query)
 
@@ -119,18 +114,28 @@ async def nl_to_cypher(state: State, config: RunnableConfig) -> dict[str, Any]:
             for row in results:
                 if "name" in row:
                     new_entities.append(row)
-                    if row.get("qid"): new_qids.append(row["qid"])
+                    if row.get("qid"):
+                        new_qids.append(row["qid"])
                 else:
                     for val in row.values():
                         if isinstance(val, dict):
-                            if "name" in val or "id" in val: new_entities.append(val)
-                            if "qid" in val and val["qid"]: new_qids.append(val["qid"])
+                            if "name" in val or "id" in val:
+                                new_entities.append(val)
+                            if "qid" in val and val["qid"]:
+                                new_qids.append(val["qid"])
                         elif not isinstance(val, (list, dict)):
                             new_entities.append({"name": str(val), "description": "Structural result"})
-                if "qid" in row and row["qid"] and row["qid"] not in new_qids: new_qids.append(row["qid"])
+                if "qid" in row and row["qid"] and row["qid"] not in new_qids:
+                    new_qids.append(row["qid"])
 
             logger.info("nl_to_cypher_success", results_count=len(results))
-            return {"generated_cypher": clean_query, "cypher_result": results, "entities": new_entities, "source_qids": new_qids, "cypher_error": ""}
+            return {
+                "generated_cypher": clean_query,
+                "cypher_result": results,
+                "entities": new_entities,
+                "source_qids": new_qids,
+                "cypher_error": ""
+            }
 
         except Exception as e:
             error_msg = str(e)

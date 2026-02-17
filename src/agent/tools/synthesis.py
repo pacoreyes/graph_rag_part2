@@ -1,17 +1,13 @@
 # -----------------------------------------------------------
 # GraphRAG system built with Agentic Reasoning
 # Tool for synthesizing answers, validating citations, and formatting output.
+# Encapsulates logic for processing AKUs (Atomic Knowledge Units), calculating
+# importance scores, checking faithfulness, and generating the final cited answer with a legend.
 #
 # (C) 2025-2026 Juan-Francisco Reyes, Cottbus, Germany
 # Released under MIT License
 # email pacoreyes@protonmail.com
 # -----------------------------------------------------------
-
-"""Tool for synthesizing answers, validating citations, and formatting output.
-
-Encapsulates logic for processing AKUs (Atomic Knowledge Units), calculating
-importance scores, checking faithfulness, and generating the final cited answer with a legend.
-"""
 
 import math
 import re
@@ -72,24 +68,25 @@ def resolve_aku_legend(
     Returns:
         tuple[str, str]: The updated answer and legend string.
     """
-    # 1. Find all citation blocks like [1], [1, 2], [1, 3, 5]
-    # We use a placeholder replacement strategy to avoid messing up indices during replacement
-    
-    citation_pattern = re.compile(r"\[([\d,\s]+)\]")
-    
-    raw_to_new = {}
-    new_idx = 1
-    citation_order = [] # List of raw IDs in order of first appearance
+    # 1. Find citation blocks like [1], [1, 2], [1, 3, 5]
+    # Only match 1-2 digit numbers to avoid capturing years like [2024]
+    _CITE_NUM = r"\d{1,2}"
+    citation_pattern = re.compile(
+        rf"\[({_CITE_NUM}(?:\s*,\s*{_CITE_NUM})*)\]"
+    )
 
-    def replacement_handler(match):
+    raw_to_new: dict[str, str] = {}
+    new_idx = 1
+    citation_order: list[str] = []
+
+    def replacement_handler(match: re.Match) -> str:
         nonlocal new_idx
         content = match.group(1)
-        # Split by comma, strip whitespace
         raw_ids = [s.strip() for s in content.split(",") if s.strip().isdigit()]
-        
+
         if not raw_ids:
-            return match.group(0) # Return original if no valid numbers
-            
+            return match.group(0)
+
         new_ids = []
         for raw in raw_ids:
             if raw not in raw_to_new:
@@ -97,7 +94,7 @@ def resolve_aku_legend(
                 new_idx += 1
                 citation_order.append(raw)
             new_ids.append(raw_to_new[raw])
-            
+
         return f"[{', '.join(new_ids)}]"
 
     updated_answer = citation_pattern.sub(replacement_handler, answer)
@@ -177,7 +174,7 @@ def check_faithfulness(answer: str, akus: list[dict]) -> dict[str, str | bool | 
     Returns:
         dict: Result containing 'is_faithful' and 'issue'.
     """
-    citations = re.findall(r"\[(\d+)\]", answer)
+    citations = re.findall(r"\[(\d{1,2})\]", answer)
     if len(answer) > 200 and len(citations) < (len(answer) / 200):
         return {"is_faithful": False, "issue": "Low citation density"}
     

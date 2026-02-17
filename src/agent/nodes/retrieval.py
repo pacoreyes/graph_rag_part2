@@ -1,17 +1,13 @@
 # -----------------------------------------------------------
 # GraphRAG system built with Agentic Reasoning
 # Retrieval nodes for the LangGraph agent.
+# Each function is a LangGraph node that performs one step in
+# the multi-strategy retrieval pipeline (Local / Global / Hybrid).
 #
 # (C) 2025-2026 Juan-Francisco Reyes, Cottbus, Germany
 # Released under MIT License
 # email pacoreyes@protonmail.com
 # -----------------------------------------------------------
-
-"""Retrieval nodes for the LangGraph agent.
-
-Each function is a LangGraph node that performs one step in
-the multi-strategy retrieval pipeline (Local / Global / Hybrid).
-"""
 
 import asyncio
 import math
@@ -163,7 +159,7 @@ async def entity_search(state: State, config: RunnableConfig) -> dict[str, Any]:
 
     # 3. Deduplicate and merge by entity ID, applying similarity filter for vector results
     seen_ids: set[str] = set()
-    seen_names: dict[str, float] = {} # name -> pagerank
+    seen_names: dict[str, float] = {}  # name -> pagerank
     entities: list[dict] = []
     qids: list[str] = []
 
@@ -175,6 +171,11 @@ async def entity_search(state: State, config: RunnableConfig) -> dict[str, Any]:
     # Sort combined results by PageRank (desc) then Score (desc) to prioritize canonical entities
     all_results.sort(key=lambda x: (x.get("pagerank", 0), x.get("score", 0)), reverse=True)
 
+    # Compute top raw score BEFORE deduplication for correct pruning
+    top_score = max(
+        (r.get("score", 0) for r in all_results), default=0
+    )
+
     for row in all_results:
         eid = row["id"]
         name = row["name"]
@@ -183,9 +184,13 @@ async def entity_search(state: State, config: RunnableConfig) -> dict[str, Any]:
         # Skip if we've seen this ID
         if eid in seen_ids:
             continue
-        
+
         # Name-based deduplication: skip if we've seen this name with a higher PageRank
         if name in seen_names and seen_names[name] >= pagerank:
+            continue
+
+        # Relative score pruning: skip entities below 80% of top raw score
+        if top_score > 0 and row.get("score", 0) < top_score * 0.8:
             continue
 
         seen_ids.add(eid)
@@ -198,11 +203,13 @@ async def entity_search(state: State, config: RunnableConfig) -> dict[str, Any]:
         if row.get("qid"):
             qids.append(row["qid"])
 
-    # Relative score pruning: keep only entities within 80% of top score
-    if entities:
-        top_score = entities[0].get("score", 0)
-        if top_score > 0:
-            entities = [e for e in entities if e.get("score", 0) >= top_score * 0.8]
+    # Soft filter by target_entity_types: prefer matching types but keep
+    # non-matching entities if filtered set would be too small
+    target_types = state.target_entity_types
+    if target_types:
+        typed = [e for e in entities if e.get("type") in target_types]
+        if len(typed) >= configuration.retrieval_k:
+            entities = typed
 
     # Limit to top K total entities to keep context focused
     entities = entities[:configuration.retrieval_k * 2]
@@ -235,42 +242,43 @@ async def neighborhood_expand(state: State, config: RunnableConfig) -> dict[str,
     current_entities = list(state.entities)
 
     for depth in range(max_depth):
-        next_entities = []
-        for entity in current_entities:
-            entity_id = entity.get("id")
-            if not entity_id:
-                continue
+        # Query all entities at this depth concurrently
+        entity_ids = [e.get("id") for e in current_entities if e.get("id")]
+        if not entity_ids:
+            break
 
-            results = await query_knowledge_graph(
+        hop_results = await asyncio.gather(*(
+            query_knowledge_graph(
                 SEMANTIC_RELATION_SEARCH,
                 driver=driver,
                 parameters={
-                    "entity_id": entity_id,
+                    "entity_id": eid,
                     "embedding": state.query_embedding,
                     "threshold": configuration.similarity_threshold,
                     "limit": limit_per_entity,
                 },
             )
+            for eid in entity_ids
+        ))
 
+        next_entities = []
+        for results in hop_results:
+            max_rel_score = results[0].get("score", 0) if results else 0
             for row in results:
-                neighbor_id = row.get("id")
                 score = row.get("score", 0)
-                
+
                 # Relative score pruning for neighbors within a hop
-                if results:
-                    max_rel_score = results[0].get("score", 0)
-                    if score < max_rel_score * 0.8:
-                        continue
-                
-                # Add origin metadata for USA Framework
+                if score < max_rel_score * 0.8:
+                    continue
+
                 row["origin"] = "Graph DB"
                 row["method"] = "Neighborhood Expansion (DRIFT)"
-                # row["type"] is already set to the relationship type from Cypher
-                
+
                 all_relationships.append(row)
                 if row.get("qid"):
                     all_qids.append(row["qid"])
 
+                neighbor_id = row.get("id")
                 if neighbor_id and neighbor_id not in visited_ids:
                     visited_ids.add(neighbor_id)
                     next_entities.append(row)
@@ -334,37 +342,44 @@ async def chunk_search(state: State, config: RunnableConfig) -> dict[str, Any]:
     else:
         filter_dict = None
 
-    # Semantic Scoping (Filter by LLM-identified types)
-    if state.target_entity_types and filter_dict:
-        filter_dict = {
-            "$and": [
-                {"entity_type": {"$in": state.target_entity_types}},
-                filter_dict
-            ]
-        }
-    elif state.target_entity_types:
-        filter_dict = {"entity_type": {"$in": state.target_entity_types}}
-
-    # 2. Vector search with Surgical Filtering
-    response = await asyncio.to_thread(
-        vector_search,
-        client=client,
-        index_name=settings.pinecone_index_chunks_name,
-        query_vector=query_vector,
-        top_k=configuration.retrieval_k * 2, # Fetch more for re-ranking
-        filter_dict=filter_dict,
+    # 2. Build graduated filter cascade (strict → loose)
+    type_filter = (
+        {"entity_type": {"$in": state.target_entity_types}}
+        if state.target_entity_types
+        else None
     )
 
-    # Fallback: if filtered search returned nothing, try open search
-    if not response.get("matches") and filter_dict is not None:
-        logger.warning("chunk_search_fallback", reason="no_filtered_results", filter=filter_dict)
+    filter_cascade: list[dict | None] = []
+    # Level 1: entity_type AND (article_id OR community_id)
+    if type_filter and filter_dict:
+        filter_cascade.append({"$and": [type_filter, filter_dict]})
+    # Level 2: article_id OR community_id (without type constraint)
+    if filter_dict:
+        filter_cascade.append(filter_dict)
+    # Level 3: entity_type only
+    if type_filter:
+        filter_cascade.append(type_filter)
+    # Level 4: open search (no filter)
+    filter_cascade.append(None)
+
+    k = configuration.retrieval_k
+    response: dict = {"matches": []}
+    for level, cascade_filter in enumerate(filter_cascade):
         response = await asyncio.to_thread(
             vector_search,
             client=client,
             index_name=settings.pinecone_index_chunks_name,
             query_vector=query_vector,
-            top_k=configuration.retrieval_k,
-            filter_dict=None,
+            top_k=k * 2 if cascade_filter else k,
+            filter_dict=cascade_filter,
+        )
+        if response.get("matches"):
+            break
+        logger.warning(
+            "chunk_search_fallback",
+            reason="no_filtered_results",
+            level=level,
+            filter=cascade_filter,
         )
 
     # 3. Authority-Led Re-ranking (Anchor Retrieval)
@@ -400,7 +415,7 @@ async def chunk_search(state: State, config: RunnableConfig) -> dict[str, Any]:
 
     # Sort by boosted score and limit to retrieval_k
     chunks.sort(key=lambda x: x["score"], reverse=True)
-    chunks = chunks[:configuration.retrieval_k]
+    chunks = chunks[:k]
 
     logger.info("chunk_search_done", count=len(chunks), filter=bool(filter_dict))
     return {"chunk_evidence": chunks, "source_qids": qids}
@@ -423,36 +438,39 @@ async def community_search(state: State, config: RunnableConfig) -> dict[str, An
     # Generate Llama embedding explicitly (1024-dim)
     query_vector = await asyncio.to_thread(pinecone_embed, client, query_text)
 
-    # Multi-level search: if level is 2, also fetch some from level 1 for more detail
+    # Build level filter — single call with $or when multi-level
     levels_to_search = [configuration.community_level]
     if configuration.community_level == 2 and state.strategy in ("global", "hybrid"):
         levels_to_search.append(1)
 
-    all_reports = []
-    for level in levels_to_search:
-        filter_dict = {"level": {"$eq": level}}
-        response = await asyncio.to_thread(
-            vector_search,
-            client=client,
-            index_name=settings.pinecone_index_community_summaries,
-            query_vector=query_vector,
-            top_k=configuration.retrieval_k,
-            filter_dict=filter_dict,
-        )
-        all_reports.extend([
-            {
-                "id": match["id"],
-                "score": match["score"],
-                "summary": match.get("metadata", {}).get("text", ""),
-                "title": match.get("metadata", {}).get("title", ""),
-                "community_id": match.get("metadata", {}).get("community_id", ""),
-                "level": match.get("metadata", {}).get("level", ""),
-                "origin": "Vector DB",
-                "method": f"Community Summary (Leiden Level {match.get('metadata', {}).get('level', '')})",
-                "type": "Thematic Summary"
-            }
-            for match in response.get("matches", [])
-        ])
+    if len(levels_to_search) > 1:
+        filter_dict = {"$or": [{"level": {"$eq": lv}} for lv in levels_to_search]}
+    else:
+        filter_dict = {"level": {"$eq": levels_to_search[0]}}
+
+    response = await asyncio.to_thread(
+        vector_search,
+        client=client,
+        index_name=settings.pinecone_index_community_summaries,
+        query_vector=query_vector,
+        top_k=configuration.retrieval_k * len(levels_to_search),
+        filter_dict=filter_dict,
+    )
+
+    all_reports = [
+        {
+            "id": match["id"],
+            "score": match["score"],
+            "summary": match.get("metadata", {}).get("text", ""),
+            "title": match.get("metadata", {}).get("title", ""),
+            "community_id": match.get("metadata", {}).get("community_id", ""),
+            "level": match.get("metadata", {}).get("level", ""),
+            "origin": "Vector DB",
+            "method": f"Community Summary (Leiden Level {match.get('metadata', {}).get('level', '')})",
+            "type": "Thematic Summary",
+        }
+        for match in response.get("matches", [])
+    ]
 
     logger.info("community_search_done", count=len(all_reports), levels=levels_to_search)
     return {"community_reports": all_reports}
@@ -473,37 +491,44 @@ async def community_members_search(
     _ = config
     driver = await neo4j_client.get_driver()
 
-    all_entities: list[dict] = []
-    qids: list[str] = []
-
+    # Build query tasks for all communities
+    _level_queries = {0: COMMUNITY_MEMBERS_L0, 1: COMMUNITY_MEMBERS_L1}
+    tasks = []
+    task_levels: list[int] = []
     for report in state.community_reports:
         community_id = report.get("community_id")
         level = report.get("level")
         if community_id is None or level is None:
             continue
-
-        # Select query based on Leiden level
-        if level == 0:
-            query = COMMUNITY_MEMBERS_L0
-        elif level == 1:
-            query = COMMUNITY_MEMBERS_L1
-        else:
-            query = COMMUNITY_MEMBERS_L2
-
-        results = await query_knowledge_graph(
-            query,
-            driver=driver,
-            parameters={"community_id": community_id},
+        query = _level_queries.get(level, COMMUNITY_MEMBERS_L2)
+        tasks.append(
+            query_knowledge_graph(
+                query, driver=driver, parameters={"community_id": community_id},
+            )
         )
+        task_levels.append(level)
+
+    # Execute all community queries concurrently
+    all_results = await asyncio.gather(*tasks) if tasks else []
+
+    all_entities: list[dict] = []
+    qids: list[str] = []
+    for level, results in zip(task_levels, all_results):
         for row in results:
             row["origin"] = "Graph DB"
             row["method"] = f"Community Discovery (L{level})"
-            # Use the actual type from the row
-            
         all_entities.extend(results)
         for row in results:
             if row.get("qid"):
                 qids.append(row["qid"])
+
+    # Soft filter by target_entity_types: prefer matching types
+    target_types = state.target_entity_types
+    if target_types:
+        typed = [e for e in all_entities if e.get("type") in target_types]
+        if typed:
+            all_entities = typed
+            qids = [e["qid"] for e in all_entities if e.get("qid")]
 
     logger.info("community_members_search_done", count=len(all_entities))
     return {"entities": all_entities, "source_qids": qids}

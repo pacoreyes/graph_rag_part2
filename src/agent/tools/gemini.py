@@ -1,35 +1,40 @@
 # -----------------------------------------------------------
 # GraphRAG system built with Agentic Reasoning
 # Reusable Google Gemini generation functions.
+# Pure functions with dependency injection — no global config or singletons.
 #
 # (C) 2025-2026 Juan-Francisco Reyes, Cottbus, Germany
 # Released under MIT License
 # email pacoreyes@protonmail.com
 # -----------------------------------------------------------
 
-"""Reusable Google Gemini generation functions.
-
-Pure functions with dependency injection — no global config or singletons.
-"""
-
+import random
 import time
-import logging
 from typing import Any
+
+import structlog
 from google import genai
 from google.genai.errors import ClientError
 
-logger = logging.getLogger(__name__)
+logger = structlog.get_logger()
+
+MAX_RETRIES = 5
+BASE_BACKOFF = 2.0
+
 
 def gemini_generate(
     client: genai.Client,
     prompt: str,
     system_instruction: str | None = None,
     model: str = "models/gemini-2.0-flash",
-    # model: str = "models/gemini-2.0-flash-lite",
     response_mime_type: str = "text/plain",
     response_schema: Any | None = None,
 ) -> Any:
-    """Generate text or structured data using Google Gemini with native retries.
+    """Generate text or structured data using Google Gemini with retries.
+
+    Uses exponential backoff with jitter on 429 (rate limit) errors.
+    This function is synchronous — callers should wrap it with
+    ``asyncio.to_thread`` to avoid blocking the event loop.
 
     Args:
         client: Gemini client instance (injected).
@@ -46,10 +51,7 @@ def gemini_generate(
     if response_schema:
         config["response_schema"] = response_schema
 
-    max_retries = 5
-    backoff = 2.0
-
-    for attempt in range(max_retries):
+    for attempt in range(MAX_RETRIES):
         try:
             response = client.models.generate_content(
                 model=model,
@@ -59,24 +61,32 @@ def gemini_generate(
                     **config
                 ),
             )
-            
+
             if response_mime_type == "application/json":
                 return response.parsed
             return response.text
 
         except ClientError as e:
-            # Check for 429 Resource Exhausted
-            if getattr(e, "status_code", 0) == 429:
-                if attempt == max_retries - 1:
-                    logger.error(f"Gemini API rate limit exceeded after {max_retries} attempts.")
+            if getattr(e, "code", 0) == 429:
+                if attempt == MAX_RETRIES - 1:
+                    logger.error(
+                        "gemini_rate_limit_exhausted",
+                        attempts=MAX_RETRIES,
+                    )
                     raise
-                
-                sleep_time = backoff * (2 ** attempt)
-                logger.warning(f"Gemini 429 Rate Limit. Retrying in {sleep_time}s... (Attempt {attempt + 1}/{max_retries})")
-                time.sleep(sleep_time)
+
+                sleep_time = BASE_BACKOFF * (2 ** attempt)
+                jitter = random.uniform(0, sleep_time * 0.25)
+                total_sleep = sleep_time + jitter
+                logger.warning(
+                    "gemini_rate_limit_retry",
+                    attempt=attempt + 1,
+                    max_retries=MAX_RETRIES,
+                    sleep_seconds=round(total_sleep, 1),
+                )
+                time.sleep(total_sleep)
             else:
-                # Re-raise other errors immediately
                 raise
         except Exception as e:
-            logger.error(f"Unexpected error in gemini_generate: {e}")
+            logger.error("gemini_generate_error", error=str(e))
             raise

@@ -61,7 +61,20 @@ def test_route_by_strategy_hybrid():
     result = route_by_strategy(state)
     assert "entity_search" in result
     assert "community_search" in result
-    assert "nl_to_cypher" in result
+    assert "nl_to_cypher" not in result
+
+
+def test_route_by_strategy_drift():
+    state = State(strategy="drift", is_fast_track=False)
+    result = route_by_strategy(state)
+    assert result == ["entity_search"]
+    assert "nl_to_cypher" not in result
+
+
+def test_route_by_strategy_structural():
+    state = State(strategy="structural", is_fast_track=False)
+    result = route_by_strategy(state)
+    assert result == ["nl_to_cypher"]
 
 
 def test_route_after_retrieval_fast_track():

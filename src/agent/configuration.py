@@ -7,8 +7,6 @@
 # email pacoreyes@protonmail.com
 # -----------------------------------------------------------
 
-"""Runtime configuration for the LangGraph agent."""
-
 from __future__ import annotations
 
 from dataclasses import dataclass, field

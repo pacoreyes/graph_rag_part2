@@ -1,6 +1,7 @@
 # -----------------------------------------------------------
 # GraphRAG system built with Agentic Reasoning
 # Resolve Wikidata QIDs to source URLs via parquet lookup.
+# Pure function with dependency injection — no global config or singletons.
 #
 # (C) 2025-2026 Juan-Francisco Reyes, Cottbus, Germany
 # Released under MIT License

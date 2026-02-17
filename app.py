@@ -1,9 +1,11 @@
-"""Chainlit chat UI wired to the LangGraph agent.
-
-Entry point for ``chainlit run app.py``.
-Maintains per-session conversation history and delegates to the compiled
-LangGraph graph for every user message.
-"""
+# -----------------------------------------------------------
+# GraphRAG system built with Agentic Reasoning
+# Chainlit chat UI wired to the LangGraph agent.
+#
+# (C) 2025-2026 Juan-Francisco Reyes, Cottbus, Germany
+# Released under MIT License
+# email pacoreyes@protonmail.com
+# -----------------------------------------------------------
 
 import chainlit as cl
 import structlog
@@ -80,31 +82,37 @@ async def on_message(message: cl.Message) -> None:
             # Update the same step instead of creating new ones
             active_step.name = f"{node_name}"
 
-            if node_name == "planner":
-                active_step.output = f"Thought: {state_update.get('plan', 'unknown')}"
+            if node_name == "router":
+                strategy = state_update.get("strategy", "unknown")
+                active_step.output = f"Strategy: {strategy}. Plan: {state_update.get('plan', '')}"
+            elif node_name == "embed_query":
+                active_step.output = "Query embedded."
             elif node_name == "entity_search":
                 count = len(state_update.get("entities", []))
                 active_step.output = f"Retrieved {count} entities from Knowledge Graph."
+            elif node_name == "neighborhood_expand":
+                count = len(state_update.get("relationships", []))
+                active_step.output = f"Expanded neighborhood: {count} relationships found."
             elif node_name == "community_search":
                 count = len(state_update.get("community_reports", []))
-                active_step.output = f"Retrieved {count} community summaries from Pinecone."
-            elif node_name == "resolve_sources":
-                count = len(state_update.get("source_urls", {}))
-                active_step.output = f"Resolved {count} Wikipedia sources."
+                active_step.output = f"Retrieved {count} community summaries."
+            elif node_name == "community_members_search":
+                count = len(state_update.get("entities", []))
+                active_step.output = f"Found {count} community members."
+            elif node_name == "chunk_search":
+                count = len(state_update.get("chunk_evidence", []))
+                active_step.output = f"Retrieved {count} text evidence chunks."
             elif node_name == "nl_to_cypher":
                 if state_update.get("cypher_error"):
                     active_step.output = f"Structural query failed: {state_update.get('cypher_error')}"
                 else:
                     count = len(state_update.get("cypher_result", []))
                     active_step.output = f"Structural query found {count} results."
-            elif node_name == "retrieval_evaluator":
-                status = "Sufficient" if state_update.get("skip_deep_search") else "Insufficient"
-                active_step.output = f"Retrieval {status}. Guide: {state_update.get('retrieval_guide', 'None')}"
-            elif node_name == "answer_critic":
-                if state_update.get("critique"):
-                    active_step.output = f"Critique (Loop {state_update.get('iteration_count', 0)}): {state_update.get('critique')}"
-                else:
-                    active_step.output = "Quality Check Passed."
+            elif node_name == "resolve_sources":
+                count = len(state_update.get("source_urls", {}))
+                active_step.output = f"Resolved {count} Wikipedia sources."
+            elif node_name == "synthesize_answer":
+                active_step.output = "Generating answer with citations."
             else:
                 active_step.output = f"Step {node_name} completed."
             

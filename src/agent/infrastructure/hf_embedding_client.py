@@ -7,8 +7,6 @@
 # email pacoreyes@protonmail.com
 # -----------------------------------------------------------
 
-"""Hugging Face Inference API embedding client."""
-
 import asyncio
 import structlog
 from curl_cffi import requests

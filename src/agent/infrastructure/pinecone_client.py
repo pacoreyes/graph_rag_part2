@@ -7,8 +7,6 @@
 # email pacoreyes@protonmail.com
 # -----------------------------------------------------------
 
-"""Pinecone client manager with dependency injection."""
-
 import asyncio
 from pinecone import Pinecone
 

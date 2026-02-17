@@ -7,8 +7,6 @@
 # email pacoreyes@protonmail.com
 # -----------------------------------------------------------
 
-"""Google Gemini client manager with dependency injection."""
-
 import asyncio
 from google import genai
 from pathlib import Path

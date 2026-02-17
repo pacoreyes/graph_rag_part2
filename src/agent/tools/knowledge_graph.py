@@ -1,16 +1,12 @@
 # -----------------------------------------------------------
 # GraphRAG system built with Agentic Reasoning
 # Reusable Neo4j knowledge graph query function and schema utilities.
+# Pure functions with dependency injection — no global config or singletons.
 #
 # (C) 2025-2026 Juan-Francisco Reyes, Cottbus, Germany
 # Released under MIT License
 # email pacoreyes@protonmail.com
 # -----------------------------------------------------------
-
-"""Reusable Neo4j knowledge graph query function and schema utilities.
-
-Pure functions with dependency injection — no global config or singletons.
-"""
 
 import json
 import re

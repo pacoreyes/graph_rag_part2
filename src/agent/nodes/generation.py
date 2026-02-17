@@ -1,6 +1,7 @@
 # -----------------------------------------------------------
 # GraphRAG system built with Agentic Reasoning
 # Generation nodes for the LangGraph agent.
+# LLM-powered nodes for query analysis and answer synthesis.
 #
 # (C) 2025-2026 Juan-Francisco Reyes, Cottbus, Germany
 # Released under MIT License
@@ -13,7 +14,6 @@ LLM-powered nodes for query analysis and answer synthesis.
 """
 
 import asyncio
-import json
 from typing import Any
 
 import structlog
@@ -90,21 +90,38 @@ def homogenize_context(state: State) -> list[dict]:
     """
     raw_akus = []
 
-    # 1. Process Entities
+    # 1. Process Entities (deduplicate by id across retrieval paths)
+    seen_entity_ids: dict[str, int] = {}
+    entity_akus: list[dict] = []
     for e in state.entities:
+        eid = e.get("id") or e.get("qid")
         name = e.get("name", "Unknown")
         desc = e.get("description", "No description")
         e_type = e.get("type", "Entity")
-        raw_akus.append({
+        method = e.get("method", "Entity Search")
+
+        if eid and eid in seen_entity_ids:
+            existing = entity_akus[seen_entity_ids[eid]]
+            if method not in existing["method"]:
+                existing["method"] = f"{existing['method']} & {method}"
+            if e.get("score", 0) > existing["raw_relevance_score"]:
+                existing["raw_relevance_score"] = e.get("score", 0)
+            continue
+
+        aku = {
             "content": f"Entity ({e_type}): {name} - {desc}",
             "origin": e.get("origin", "Graph DB"),
-            "method": e.get("method", "Entity Search"),
+            "method": method,
             "raw_relevance_score": e.get("score", 0.5),
             "metadata": {
-                "qid": e.get("qid"), "type": e_type, "name": name, 
+                "qid": e.get("qid"), "type": e_type, "name": name,
                 "mention_count": e.get("mention_count", 0), "pagerank": e.get("pagerank", 0)
-            }
-        })
+            },
+        }
+        if eid:
+            seen_entity_ids[eid] = len(entity_akus)
+        entity_akus.append(aku)
+    raw_akus.extend(entity_akus)
 
     # 2. Process Relationships
     for r in state.relationships:
@@ -113,7 +130,8 @@ def homogenize_context(state: State) -> list[dict]:
         target = r.get("target_name") or r.get("name", "?")
         desc = r.get("rel_description", "")
         content = f"Relationship: {source} --[{rel}]--> {target}"
-        if desc: content += f" ({desc})"
+        if desc:
+            content += f" ({desc})"
         raw_akus.append({
             "content": content,
             "origin": r.get("origin", "Graph DB"),
@@ -147,7 +165,7 @@ def homogenize_context(state: State) -> list[dict]:
             "content": f"Thematic Summary (Community {cid}): {title} - {summary}",
             "origin": r.get("origin", "Vector DB"),
             "method": r.get("method", "Community Search"),
-            "raw_relevance_score": 0.9, # High weight for summaries
+            "raw_relevance_score": 0.9,  # High weight for summaries
             "metadata": {"community_id": cid, "type": "Community Report"}
         })
 
@@ -184,11 +202,13 @@ def homogenize_context(state: State) -> list[dict]:
     MAX_AKUS, MAX_STRUCTURAL = 12, 5
     
     for aku in unique_akus:
-        if len(final_akus) >= MAX_AKUS: break
+        if len(final_akus) >= MAX_AKUS:
+            break
         
         is_structural = "Database Fact" in aku["content"] or "Relationship" in aku["content"]
         if is_structural:
-            if structural_count >= MAX_STRUCTURAL: continue
+            if structural_count >= MAX_STRUCTURAL:
+                continue
             structural_count += 1
             
         final_akus.append(aku)
@@ -207,7 +227,8 @@ def _format_akus_for_prompt(akus: list[dict]) -> str:
     Returns:
         str: Formatted string for LLM consumption.
     """
-    if not akus: return "No context available."
+    if not akus:
+        return "No context available."
     return "\n".join([f"[{aku['index']}] {aku['content']} (Origin: {aku['origin']} | Method: {aku['method']})" for aku in akus])
 
 
@@ -221,11 +242,14 @@ def _get_query_text(message: Any) -> str:
         str: Extracted text content.
     """
     content = message.content
-    if isinstance(content, str): return content
+    if isinstance(content, str):
+        return content
     if isinstance(content, list):
         for block in content:
-            if isinstance(block, dict) and block.get("type") == "text": return block.get("text", "")
-            if isinstance(block, str): return block
+            if isinstance(block, dict) and block.get("type") == "text":
+                return block.get("text", "")
+            if isinstance(block, str):
+                return block
     return str(content)
 
 
@@ -276,7 +300,7 @@ async def router(state: State, config: RunnableConfig) -> dict[str, Any]:
         strategy = "hybrid"
 
     logger.info("router_done", strategy=strategy, fast_track=is_fast_track)
-    return {"strategy": strategy, "is_fast_track": is_fast_track, "target_entity_types": target_entity_types, "plan": plan, "iteration_count": 0}
+    return {"strategy": strategy, "is_fast_track": is_fast_track, "target_entity_types": target_entity_types, "plan": plan}
 
 
 async def synthesize_answer(state: State, config: RunnableConfig) -> dict[str, Any]:
@@ -297,8 +321,8 @@ async def synthesize_answer(state: State, config: RunnableConfig) -> dict[str, A
     system_instruction = gemini_client.get_schema_instruction()
     prompt = SYNTHESIS_PROMPT.format(
         akus=_format_akus_for_prompt(akus), 
-        critique=state.critique or "No critique.", 
-        guide=state.retrieval_guide, 
+        critique="No critique.",
+        guide="",
         query=query_text
     )
     

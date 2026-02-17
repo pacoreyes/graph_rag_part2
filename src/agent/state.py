@@ -7,8 +7,6 @@
 # email pacoreyes@protonmail.com
 # -----------------------------------------------------------
 
-"""Graph state definition for the LangGraph agent."""
-
 from __future__ import annotations
 
 import operator
@@ -26,20 +24,12 @@ class State:
     messages: Annotated[Sequence[BaseMessage], add_messages] = field(
         default_factory=list
     )
-    retrieved_context: list[str] = field(default_factory=list)
-
-    # Strategy selected by query_analyzer
+    # Strategy selected by router
     strategy: str = ""
 
-    # Reasoning and Loop management
+    # Reasoning
     plan: str = ""
     is_fast_track: bool = False
-    critique: str = ""
-    iteration_count: int = 0
-    
-    # Evaluator output
-    retrieval_guide: str = ""
-    skip_deep_search: bool = False
 
     # Generated Cypher query for structural strategy
     generated_cypher: str = ""

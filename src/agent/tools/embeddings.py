@@ -1,16 +1,12 @@
 # -----------------------------------------------------------
 # GraphRAG system built with Agentic Reasoning
 # Reusable embedding processing functions.
+# Pure functions without heavy dependencies like torch or transformers.
 #
 # (C) 2025-2026 Juan-Francisco Reyes, Cottbus, Germany
 # Released under MIT License
 # email pacoreyes@protonmail.com
 # -----------------------------------------------------------
-
-"""Reusable embedding processing functions.
-
-Pure functions without heavy dependencies like torch or transformers.
-"""
 
 import math
 

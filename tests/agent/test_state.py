@@ -13,7 +13,6 @@ from agent.state import State
 def test_state_defaults():
     state = State()
     assert list(state.messages) == []
-    assert state.retrieved_context == []
     assert state.strategy == ""
     assert state.query_embedding == []
     assert state.entities == []
@@ -24,9 +23,14 @@ def test_state_defaults():
     assert state.source_urls == {}
 
 
-def test_state_with_context():
-    state = State(retrieved_context=["doc1", "doc2"])
-    assert state.retrieved_context == ["doc1", "doc2"]
+def test_state_removed_fields_do_not_exist():
+    """Verify cleaned-up fields are no longer on State."""
+    state = State()
+    assert not hasattr(state, "retrieved_context")
+    assert not hasattr(state, "critique")
+    assert not hasattr(state, "iteration_count")
+    assert not hasattr(state, "retrieval_guide")
+    assert not hasattr(state, "skip_deep_search")
 
 
 def test_state_strategy():

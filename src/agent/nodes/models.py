@@ -7,8 +7,6 @@
 # email pacoreyes@protonmail.com
 # -----------------------------------------------------------
 
-"""Pydantic models for constrained LLM generation."""
-
 from __future__ import annotations
 
 from typing import List

@@ -1,16 +1,12 @@
 # -----------------------------------------------------------
 # GraphRAG system built with Agentic Reasoning
 # Reusable Pinecone vector search and inference functions.
+# Pure functions with dependency injection — no global config or singletons.
 #
 # (C) 2025-2026 Juan-Francisco Reyes, Cottbus, Germany
 # Released under MIT License
 # email pacoreyes@protonmail.com
 # -----------------------------------------------------------
-
-"""Reusable Pinecone vector search and inference functions.
-
-Pure functions with dependency injection — no global config or singletons.
-"""
 
 from pinecone import Pinecone
 
