@@ -27,7 +27,6 @@ venv/
 # Project
 tests/
 legacy_scripts/
-data_volume/
 docs/
 work_LOG.md
 Makefile

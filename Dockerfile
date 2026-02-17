@@ -11,24 +11,31 @@ ENV UV_COMPILE_BYTECODE=1
 COPY pyproject.toml uv.lock ./
 
 # Install dependencies into a portable location
-RUN --mount=type=cache,target=/root/.cache/uv 
-    uv sync --frozen --no-install-project --no-dev
+RUN uv sync --no-install-project --no-dev
 
 # Copy the source code
 COPY src/ ./src/
+COPY data_volume/ ./data_volume/
 COPY app.py ./
 COPY chainlit.md ./
+COPY langgraph.json ./
 COPY public/ ./public/
 COPY .chainlit/ ./.chainlit/
 
 # Install the project itself
-RUN --mount=type=cache,target=/root/.cache/uv 
-    uv sync --frozen --no-dev
+RUN uv sync --no-dev
 
 # Final Stage
 FROM python:3.13-slim-bookworm
 
 WORKDIR /app
+
+# Install runtime dependencies
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    ca-certificates \
+    libssl3 \
+    libcurl4 \
+    && rm -rf /var/lib/apt/lists/*
 
 # Copy the environment and application from the builder
 COPY --from=builder /app /app

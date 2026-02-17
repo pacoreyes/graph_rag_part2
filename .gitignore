@@ -34,7 +34,8 @@ dist/
 .claude/
 
 # Chainlit
-.chainlit/
+# We allow .chainlit/ to be committed/uploaded for UI configuration
+# .chainlit/
 
 # GitHub
 .github
