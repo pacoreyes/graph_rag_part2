@@ -1,3 +1,12 @@
+# -----------------------------------------------------------
+# GraphRAG system built with Agentic Reasoning
+# Structural expert node for NL-to-Cypher translation.
+#
+# (C) 2025-2026 Juan-Francisco Reyes, Cottbus, Germany
+# Released under MIT License
+# email pacoreyes@protonmail.com
+# -----------------------------------------------------------
+
 """Structural expert node for NL-to-Cypher translation.
 
 Handles queries requiring precise database lookups, counts, or lists.
@@ -5,7 +14,7 @@ Uses EXPLAIN for validation and error-feedback loops.
 """
 
 import asyncio
-from pathlib import Path
+import json
 from typing import Any
 
 import structlog
@@ -13,16 +22,23 @@ from langchain_core.runnables import RunnableConfig
 
 from agent.configuration import Configuration
 from agent.infrastructure.clients import gemini_client, neo4j_client
-from agent.settings import settings
+from agent.nodes.models import CypherResponse
 from agent.state import State
 from agent.tools.gemini import gemini_generate
-from agent.tools.knowledge_graph import format_schema_for_prompt, query_knowledge_graph
+from agent.tools.knowledge_graph import query_knowledge_graph
 
 logger = structlog.get_logger()
 
 
 def _get_query_text(message: Any) -> str:
-    """Extract string content from a message, handling list-of-blocks format."""
+    """Extract string content from a message, handling list-of-blocks format.
+    
+    Args:
+        message: LangChain message object.
+        
+    Returns:
+        str: Extracted text content.
+    """
     content = message.content
     if isinstance(content, str):
         return content
@@ -34,9 +50,6 @@ def _get_query_text(message: Any) -> str:
                 return block
     return str(content)
 
-
-import json
-from agent.nodes.models import CypherResponse
 
 STRUCTURAL_CYPHER_PROMPT = """You are an expert Neo4j Cypher developer for a music GraphRAG system.
 
@@ -55,7 +68,15 @@ User Question: {query}"""
 
 
 async def nl_to_cypher(state: State, config: RunnableConfig) -> dict[str, Any]:
-    """Expert node for generating and executing Cypher queries with structured output and caching."""
+    """Expert node for generating and executing Cypher queries with structured output and caching.
+    
+    Args:
+        state: Current graph state.
+        config: LangGraph runtime configuration.
+        
+    Returns:
+        dict[str, Any]: Partial state update with generated cypher and results.
+    """
     configuration = Configuration.from_runnable_config(config)
     client = await gemini_client.get_client()
     driver = await neo4j_client.get_driver()
@@ -64,22 +85,26 @@ async def nl_to_cypher(state: State, config: RunnableConfig) -> dict[str, Any]:
     system_instruction = gemini_client.get_schema_instruction()
     error_context, max_retries = "", 1
 
+    clean_query = ""
     for attempt in range(max_retries + 1):
         prompt = STRUCTURAL_CYPHER_PROMPT.format(query=query_text, error_context=error_context)
-        response_text = await asyncio.to_thread(
+        response = await asyncio.to_thread(
             gemini_generate, 
             client, 
             prompt, 
             model=configuration.model,
             response_schema=CypherResponse,
-            system_instruction=system_instruction
+            system_instruction=system_instruction,
+            response_mime_type="application/json",
         )
         
-        try:
-            data = json.loads(response_text)
-            clean_query = data.get("cypher", "").strip()
-        except Exception:
-            clean_query = response_text.strip() # Fallback
+        if isinstance(response, CypherResponse):
+            clean_query = response.cypher.strip()
+        elif isinstance(response, dict):
+            clean_query = response.get("cypher", "").strip()
+        else:
+            logger.warning("nl_to_cypher_parse_failed", raw=response)
+            clean_query = str(response).strip() # Fallback
 
         logger.info("nl_to_cypher_validate", attempt=attempt, query=clean_query)
 

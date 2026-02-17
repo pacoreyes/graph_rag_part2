@@ -1,3 +1,12 @@
+# -----------------------------------------------------------
+# GraphRAG system built with Agentic Reasoning
+# Create a temp parquet file with test data.
+#
+# (C) 2025-2026 Juan-Francisco Reyes, Cottbus, Germany
+# Released under MIT License
+# email pacoreyes@protonmail.com
+# -----------------------------------------------------------
+
 import tempfile
 from pathlib import Path
 

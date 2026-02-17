@@ -1,3 +1,12 @@
+# -----------------------------------------------------------
+# GraphRAG system built with Agentic Reasoning
+# Create a State with sensible defaults for testing.
+#
+# (C) 2025-2026 Juan-Francisco Reyes, Cottbus, Germany
+# Released under MIT License
+# email pacoreyes@protonmail.com
+# -----------------------------------------------------------
+
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
@@ -36,12 +45,11 @@ def _make_config(**configurable):
 # --- embed_query ---
 
 
-@patch("agent.nodes.retrieval.nomic_client")
-async def test_embed_query_returns_embedding(mock_nomic_client):
-    mock_nomic_client.get_model = AsyncMock(return_value=MagicMock())
-    mock_nomic_client.get_tokenizer = AsyncMock(return_value=MagicMock())
+@patch("agent.nodes.retrieval.hf_embedding_client")
+async def test_embed_query_returns_embedding(mock_hf_client):
+    mock_hf_client.embed = AsyncMock(return_value=[0.1] * 384)
 
-    with patch("agent.nodes.retrieval.nomic_embed", return_value=[0.5] * 384):
+    with patch("agent.nodes.retrieval.process_embedding", return_value=[0.5] * 384):
         state = _make_state()
         result = await embed_query(state, _make_config())
 

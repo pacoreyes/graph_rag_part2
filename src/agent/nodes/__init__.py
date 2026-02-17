@@ -1,3 +1,12 @@
+# -----------------------------------------------------------
+# GraphRAG system built with Agentic Reasoning
+# Graph node functions for the LangGraph agent.
+#
+# (C) 2025-2026 Juan-Francisco Reyes, Cottbus, Germany
+# Released under MIT License
+# email pacoreyes@protonmail.com
+# -----------------------------------------------------------
+
 """Graph node functions for the LangGraph agent."""
 
 from agent.nodes.generation import router, synthesize_answer

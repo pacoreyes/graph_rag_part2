@@ -1,3 +1,12 @@
+# -----------------------------------------------------------
+# GraphRAG system built with Agentic Reasoning
+# Test graph can be invoked with a proper State-compatible input.
+#
+# (C) 2025-2026 Juan-Francisco Reyes, Cottbus, Germany
+# Released under MIT License
+# email pacoreyes@protonmail.com
+# -----------------------------------------------------------
+
 import pytest
 from langchain_core.messages import HumanMessage
 from langgraph.pregel import Pregel

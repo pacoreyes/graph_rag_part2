@@ -1,3 +1,12 @@
+# -----------------------------------------------------------
+# GraphRAG system built with Agentic Reasoning
+# LangGraph multi-strategy GraphRAG graph definition.
+#
+# (C) 2025-2026 Juan-Francisco Reyes, Cottbus, Germany
+# Released under MIT License
+# email pacoreyes@protonmail.com
+# -----------------------------------------------------------
+
 """LangGraph multi-strategy GraphRAG graph definition.
 
 Routes queries through Local, Global, or Hybrid retrieval paths

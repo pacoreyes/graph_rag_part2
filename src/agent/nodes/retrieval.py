@@ -1,3 +1,12 @@
+# -----------------------------------------------------------
+# GraphRAG system built with Agentic Reasoning
+# Retrieval nodes for the LangGraph agent.
+#
+# (C) 2025-2026 Juan-Francisco Reyes, Cottbus, Germany
+# Released under MIT License
+# email pacoreyes@protonmail.com
+# -----------------------------------------------------------
+
 """Retrieval nodes for the LangGraph agent.
 
 Each function is a LangGraph node that performs one step in
@@ -14,12 +23,12 @@ from langchain_core.runnables import RunnableConfig
 from agent.configuration import Configuration
 from agent.infrastructure.clients import (
     neo4j_client,
-    nomic_client,
+    hf_embedding_client,
     pinecone_client,
 )
 from agent.settings import settings
 from agent.state import State
-from agent.tools.embeddings import nomic_embed
+from agent.tools.embeddings import process_embedding
 from agent.tools.knowledge_graph import (
     query_knowledge_graph,
     sanitize_lucene_query,
@@ -96,7 +105,7 @@ def _get_query_text(message: Any) -> str:
 
 
 async def embed_query(state: State, config: RunnableConfig) -> dict[str, Any]:
-    """Compute Nomic embedding (384-dim) for the user query.
+    """Compute Snowflake embedding (384-dim) for the user query using HF Inference API.
 
     Args:
         state: Current graph state.
@@ -109,10 +118,11 @@ async def embed_query(state: State, config: RunnableConfig) -> dict[str, Any]:
     last_message = state.messages[-1]
     query_text = _get_query_text(last_message)
 
-    model = await nomic_client.get_model()
-    tokenizer = await nomic_client.get_tokenizer()
-    # Use 384 dimensions for Neo4j vector indexes compatibility
-    embedding = nomic_embed(model, tokenizer, query_text, dimensions=384)
+    # Call HF Inference API via HFEmbeddingClient
+    raw_embedding = await hf_embedding_client.embed(query_text)
+    
+    # process_embedding handles L2 normalization
+    embedding = process_embedding(raw_embedding)
 
     logger.info("embed_query_done", dim=len(embedding))
     return {"query_embedding": embedding}

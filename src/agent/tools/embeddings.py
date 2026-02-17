@@ -1,52 +1,35 @@
-"""Reusable Nomic embedding function.
+# -----------------------------------------------------------
+# GraphRAG system built with Agentic Reasoning
+# Reusable embedding processing functions.
+#
+# (C) 2025-2026 Juan-Francisco Reyes, Cottbus, Germany
+# Released under MIT License
+# email pacoreyes@protonmail.com
+# -----------------------------------------------------------
 
-Pure function with dependency injection — no global config or singletons.
+"""Reusable embedding processing functions.
+
+Pure functions without heavy dependencies like torch or transformers.
 """
 
-import torch
-import torch.nn.functional as F
-from transformers import PreTrainedModel, PreTrainedTokenizer
+import math
 
 
-def nomic_embed(
-    model: PreTrainedModel,
-    tokenizer: PreTrainedTokenizer,
-    text: str,
-    prefix: str = "search_query: ",
-    dimensions: int = 768,
+def process_embedding(
+    embedding: list[float],
 ) -> list[float]:
-    """Generate an embedding vector using a Nomic model.
+    """Process a raw embedding vector.
 
-    Handles tokenization, forward pass, mean pooling, Matryoshka truncation,
-    and L2 normalization.
+    Handles L2 normalization in pure Python.
 
     Args:
-        model: HuggingFace Nomic model instance (injected).
-        tokenizer: HuggingFace tokenizer instance (injected).
-        text: Text to embed.
-        prefix: Task prefix for Nomic models (default for query-time).
-        dimensions: Target dimensionality for Matryoshka truncation (default 768).
+        embedding: Raw embedding vector from the model/API.
 
     Returns:
         list[float]: The L2-normalized embedding vector.
     """
-    prefixed = f"{prefix}{text}"
-    encoded = tokenizer(prefixed, padding=True, truncation=True, return_tensors="pt")
-    with torch.no_grad():
-        outputs = model(**encoded)
-
-    # Mean pooling over token embeddings, respecting attention mask
-    attention_mask = encoded["attention_mask"]
-    token_embeddings = outputs.last_hidden_state
-    mask_expanded = attention_mask.unsqueeze(-1).expand(token_embeddings.size()).float()
-    sum_embeddings = torch.sum(token_embeddings * mask_expanded, dim=1)
-    sum_mask = torch.clamp(mask_expanded.sum(dim=1), min=1e-9)
-    mean_pooled = sum_embeddings / sum_mask
-
-    # Matryoshka truncation
-    if dimensions < 768:
-        mean_pooled = mean_pooled[:, :dimensions]
-
-    # L2 normalize
-    normalized = F.normalize(mean_pooled, p=2, dim=1)
-    return normalized[0].tolist()
+    # L2 normalize: v / sqrt(sum(x^2 for x in v))
+    squared_sum = sum(x * x for x in embedding)
+    magnitude = math.sqrt(max(squared_sum, 1e-9))
+    
+    return [x / magnitude for x in embedding]

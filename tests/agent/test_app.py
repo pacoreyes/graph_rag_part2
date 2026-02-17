@@ -1,3 +1,12 @@
+# -----------------------------------------------------------
+# GraphRAG system built with Agentic Reasoning
+# Tests for app.py — Chainlit entry point wired to the LangGraph agent.
+#
+# (C) 2025-2026 Juan-Francisco Reyes, Cottbus, Germany
+# Released under MIT License
+# email pacoreyes@protonmail.com
+# -----------------------------------------------------------
+
 """Tests for app.py — Chainlit entry point wired to the LangGraph agent."""
 
 from types import SimpleNamespace

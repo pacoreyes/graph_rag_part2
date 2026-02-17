@@ -1,59 +1,56 @@
-"""Reusable Google Gemini embedding and generation functions.
+# -----------------------------------------------------------
+# GraphRAG system built with Agentic Reasoning
+# Reusable Google Gemini generation functions.
+#
+# (C) 2025-2026 Juan-Francisco Reyes, Cottbus, Germany
+# Released under MIT License
+# email pacoreyes@protonmail.com
+# -----------------------------------------------------------
+
+"""Reusable Google Gemini generation functions.
 
 Pure functions with dependency injection — no global config or singletons.
 """
 
+from typing import Any
 from google import genai
-
-
-def gemini_embed(
-    client: genai.Client,
-    text: str,
-    model: str = "gemini-embedding-001",
-) -> list[float]:
-    """Generate an embedding vector for the given text using Google Gemini.
-
-    Args:
-        client: Gemini client instance (injected).
-        text: Text to embed.
-        model: Gemini embedding model name.
-
-    Returns:
-        list[float]: The embedding vector.
-    """
-    response = client.models.embed_content(model=model, contents=text)
-    return response.embeddings[0].values
 
 
 def gemini_generate(
     client: genai.Client,
     prompt: str,
-    model: str = "models/gemini-2.0-flash",
-    response_schema: type = None,
-    system_instruction: str = None,
-) -> str:
+    system_instruction: str | None = None,
+    # model: str = "models/gemini-2.0-flash",
+    model: str = "models/gemini-2.0-flash-lite",
+    response_mime_type: str = "text/plain",
+    response_schema: Any | None = None,
+) -> Any:
     """Generate text or structured data using Google Gemini.
 
     Args:
         client: Gemini client instance (injected).
-        prompt: The prompt to send to the model.
+        prompt: User prompt.
+        system_instruction: Optional system instruction/persona.
         model: Gemini generation model name.
-        response_schema: Optional Pydantic model or schema for structured output.
-        system_instruction: Optional system instruction to set context without repeating in prompt.
+        response_mime_type: Output MIME type (e.g., "application/json").
+        response_schema: Optional Pydantic or JSON schema for structured output.
 
     Returns:
-        str: The generated response text (or JSON string if schema provided).
+        Any: Generated content (string or parsed JSON object).
     """
-    config = {}
+    config: dict[str, Any] = {"response_mime_type": response_mime_type}
     if response_schema:
-        config["response_mime_type"] = "application/json"
         config["response_schema"] = response_schema
-    if system_instruction:
-        config["system_instruction"] = system_instruction
 
     response = client.models.generate_content(
-        model=model, 
+        model=model,
         contents=prompt,
-        config=config,
+        config=genai.types.GenerateContentConfig(
+            system_instruction=system_instruction,
+            **config
+        ),
     )
+
+    if response_mime_type == "application/json":
+        return response.parsed
     return response.text

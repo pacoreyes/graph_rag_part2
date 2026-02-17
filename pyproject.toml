@@ -19,9 +19,6 @@ dependencies = [
     "chainlit>=2.9.5",
     "structlog>=25.1.0",
     "polars",
-    "torch>=2.0.0",
-    "transformers>=4.40.0",
-    "einops>=0.8.2",
     "langgraph-cli[inmem]",
     "langgraph-api>=0.7.36",
 ]

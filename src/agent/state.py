@@ -1,3 +1,12 @@
+# -----------------------------------------------------------
+# GraphRAG system built with Agentic Reasoning
+# Graph state definition for the LangGraph agent.
+#
+# (C) 2025-2026 Juan-Francisco Reyes, Cottbus, Germany
+# Released under MIT License
+# email pacoreyes@protonmail.com
+# -----------------------------------------------------------
+
 """Graph state definition for the LangGraph agent."""
 
 from __future__ import annotations
@@ -40,7 +49,7 @@ class State:
     # Entity types identified by query_analyzer for surgical filtering
     target_entity_types: list[str] = field(default_factory=list)
 
-    # Nomic embedding of the user query (768-dim)
+    # Snowflake arctic-embed-s embedding of the user query (384-dim)
     query_embedding: list[float] = field(default_factory=list)
 
     # Retrieval results (additive reducers for parallel/sequential merging)

@@ -1,3 +1,12 @@
+# -----------------------------------------------------------
+# GraphRAG system built with Agentic Reasoning
+# Client wiring layer.
+#
+# (C) 2025-2026 Juan-Francisco Reyes, Cottbus, Germany
+# Released under MIT License
+# email pacoreyes@protonmail.com
+# -----------------------------------------------------------
+
 """Client wiring layer.
 
 This is the only module (besides settings.py) that reads secrets
@@ -7,7 +16,7 @@ injected dependencies.
 
 from agent.infrastructure.gemini_client import GeminiClient
 from agent.infrastructure.neo4j_client import Neo4jClient
-from agent.infrastructure.nomic_client import NomicClient
+from agent.infrastructure.hf_embedding_client import HFEmbeddingClient
 from agent.infrastructure.pinecone_client import PineconeClient
 from agent.settings import settings
 
@@ -23,8 +32,10 @@ pinecone_client = PineconeClient(
 
 gemini_client = GeminiClient(
     api_key=settings.gemini_api_key.get_secret_value(),
+    schema_path=f"{settings.data_volume_path}/graph_schema.json",
 )
 
-nomic_client = NomicClient(
-    model_name=settings.nomic_model_name,
+hf_embedding_client = HFEmbeddingClient(
+    model_name=settings.embedding_model_name,
+    api_token=settings.hf_token.get_secret_value(),
 )

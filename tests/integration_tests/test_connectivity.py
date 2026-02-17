@@ -1,3 +1,12 @@
+# -----------------------------------------------------------
+# GraphRAG system built with Agentic Reasoning
+# Live connectivity tests for external services.
+#
+# (C) 2025-2026 Juan-Francisco Reyes, Cottbus, Germany
+# Released under MIT License
+# email pacoreyes@protonmail.com
+# -----------------------------------------------------------
+
 """Live connectivity tests for external services.
 
 These tests hit real APIs using credentials from .env.
@@ -39,13 +48,3 @@ def test_gemini_connectivity():
     )
     assert response.text is not None
     assert len(response.text) > 0
-
-
-def test_gemini_embedding_connectivity():
-    """Verify Gemini embedding API works."""
-    client = gemini_client.get_client()
-    response = client.models.embed_content(
-        model="gemini-embedding-001", contents="hello world"
-    )
-    assert len(response.embeddings) > 0
-    assert len(response.embeddings[0].values) > 0

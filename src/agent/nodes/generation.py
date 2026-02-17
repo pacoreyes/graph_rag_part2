@@ -1,3 +1,12 @@
+# -----------------------------------------------------------
+# GraphRAG system built with Agentic Reasoning
+# Generation nodes for the LangGraph agent.
+#
+# (C) 2025-2026 Juan-Francisco Reyes, Cottbus, Germany
+# Released under MIT License
+# email pacoreyes@protonmail.com
+# -----------------------------------------------------------
+
 """Generation nodes for the LangGraph agent.
 
 LLM-powered nodes for query analysis and answer synthesis.
@@ -5,9 +14,6 @@ LLM-powered nodes for query analysis and answer synthesis.
 
 import asyncio
 import json
-import math
-import re
-from pathlib import Path
 from typing import Any
 
 import structlog
@@ -17,10 +23,14 @@ from langchain_core.runnables import RunnableConfig
 from agent.configuration import Configuration
 from agent.infrastructure.clients import gemini_client
 from agent.nodes.models import RouterResponse, SynthesisResponse
-from agent.settings import settings
 from agent.state import State
 from agent.tools.gemini import gemini_generate
-from agent.tools.knowledge_graph import format_schema_for_prompt
+from agent.tools.synthesis import (
+    calculate_aku_importance,
+    check_faithfulness,
+    flatten_dict,
+    resolve_aku_legend,
+)
 
 logger = structlog.get_logger()
 
@@ -58,30 +68,15 @@ SYNTHESIS_PROMPT = (
 )
 
 
-def _flatten_dict(d: dict) -> str:
-    """Flatten a dictionary into a comma-separated string of key-values."""
-    parts = []
-    for k, v in d.items():
-        if v is not None:
-            parts.append(f"{k}: {v}")
-    return ", ".join(parts)
-
-
-def _calculate_aku_importance(aku: dict) -> float:
-    """Calculate a base importance score for an AKU."""
-    metadata = aku.get("metadata", {})
-    # Use mention_count (log-scaled) as primary importance signal
-    mention_count = float(metadata.get("mention_count") or 0)
-    pagerank = float(metadata.get("pagerank") or 0)
-    relevance_val = aku.get("raw_relevance_score")
-    relevance = float(relevance_val if relevance_val is not None else 0.5)
-    
-    authority = math.log1p(mention_count) + math.log1p(pagerank)
-    return relevance * (1 + authority)
-
-
 def homogenize_context(state: State) -> list[dict]:
-    """Unify and prune retrieval results into a focused list of AKUs."""
+    """Unify and prune retrieval results into a focused list of AKUs.
+    
+    Args:
+        state: Current graph state containing retrieval results.
+        
+    Returns:
+        list[dict]: List of homogenized Atomic Knowledge Units.
+    """
     raw_akus = []
 
     # 1. Process Entities
@@ -142,7 +137,7 @@ def homogenize_context(state: State) -> list[dict]:
 
     # 5. Process Cypher Results
     for res in state.cypher_result:
-        content = _flatten_dict(res)
+        content = flatten_dict(res)
         raw_akus.append({
             "content": f"Database Fact: {content}",
             "origin": "Graph DB",
@@ -162,7 +157,7 @@ def homogenize_context(state: State) -> list[dict]:
                 existing["method"] = f"{existing['method']} & {aku['method']}"
         else:
             seen_content[content] = len(unique_akus)
-            aku["importance"] = _calculate_aku_importance(aku)
+            aku["importance"] = calculate_aku_importance(aku)
             unique_akus.append(aku)
 
     # Pruning: Sort by importance and cap redundancy
@@ -170,7 +165,7 @@ def homogenize_context(state: State) -> list[dict]:
     
     final_akus = []
     structural_count = 0
-    MAX_AKUS, MAX_STRUCTURAL = 20, 8
+    MAX_AKUS, MAX_STRUCTURAL = 12, 5
     
     for aku in unique_akus:
         if len(final_akus) >= MAX_AKUS: break
@@ -188,13 +183,27 @@ def homogenize_context(state: State) -> list[dict]:
 
 
 def _format_akus_for_prompt(akus: list[dict]) -> str:
-    """Format AKUs into a readable block for the prompt."""
+    """Format AKUs into a readable block for the prompt.
+    
+    Args:
+        akus: List of Atomic Knowledge Units.
+        
+    Returns:
+        str: Formatted string for LLM consumption.
+    """
     if not akus: return "No context available."
     return "\n".join([f"[{aku['index']}] {aku['content']} (Origin: {aku['origin']} | Method: {aku['method']})" for aku in akus])
 
 
 def _get_query_text(message: Any) -> str:
-    """Extract string content from a message."""
+    """Extract string content from a message.
+    
+    Args:
+        message: LangChain message object.
+        
+    Returns:
+        str: Extracted text content.
+    """
     content = message.content
     if isinstance(content, str): return content
     if isinstance(content, list):
@@ -205,7 +214,15 @@ def _get_query_text(message: Any) -> str:
 
 
 async def router(state: State, config: RunnableConfig) -> dict[str, Any]:
-    """Consolidated router node with structured output and context caching."""
+    """Consolidated router node with structured output and context caching.
+    
+    Args:
+        state: Current graph state.
+        config: LangGraph runtime configuration.
+        
+    Returns:
+        dict[str, Any]: Partial state update with strategy and plan.
+    """
     configuration = Configuration.from_runnable_config(config)
     client = await gemini_client.get_client()
     query_text = _get_query_text(state.messages[-1])
@@ -214,22 +231,28 @@ async def router(state: State, config: RunnableConfig) -> dict[str, Any]:
     system_instruction = gemini_client.get_schema_instruction()
     prompt = ROUTER_PROMPT.format(query=query_text)
 
-    response_text = await asyncio.to_thread(
+    response = await asyncio.to_thread(
         gemini_generate, 
         client, 
         prompt, 
         model=configuration.model,
         response_schema=RouterResponse,
-        system_instruction=system_instruction
+        system_instruction=system_instruction,
+        response_mime_type="application/json",
     )
 
-    try:
-        data = json.loads(response_text)
-        strategy = data.get("strategy", "hybrid").lower()
-        is_fast_track = data.get("is_fast_track", False)
-        target_entity_types = data.get("target_entity_types", [])
-        plan = data.get("plan", "Optimized routing.")
-    except Exception:
+    if isinstance(response, RouterResponse):
+        strategy = response.strategy.lower()
+        is_fast_track = response.is_fast_track
+        target_entity_types = response.target_entity_types
+        plan = response.plan
+    elif isinstance(response, dict):
+        strategy = response.get("strategy", "hybrid").lower()
+        is_fast_track = response.get("is_fast_track", False)
+        target_entity_types = response.get("target_entity_types", [])
+        plan = response.get("plan", "Optimized routing.")
+    else:
+        logger.warning("router_parse_failed", raw=response)
         strategy, is_fast_track, target_entity_types, plan = "hybrid", False, [], "Fallback."
 
     # Validate strategy
@@ -240,65 +263,16 @@ async def router(state: State, config: RunnableConfig) -> dict[str, Any]:
     return {"strategy": strategy, "is_fast_track": is_fast_track, "target_entity_types": target_entity_types, "plan": plan, "iteration_count": 0}
 
 
-def _resolve_aku_legend(answer: str, akus: list[dict], source_urls: dict[str, dict[str, str]], llm_evidence: dict[str, str] = None) -> tuple[str, str]:
-    """Build a structured legend and re-index citations sequentially."""
-    raw_citations = re.findall(r"\[(\d+)\]", answer)
-    if not raw_citations: return answer, ""
-
-    raw_to_new, new_idx = {}, 1
-    for raw in raw_citations:
-        if raw not in raw_to_new:
-            raw_to_new[raw] = str(new_idx)
-            new_idx += 1
-
-    updated_answer = re.sub(r"\[(\d+)\]", lambda m: f"[{raw_to_new[m.group(1)]}]", answer)
-    aku_map = {str(aku["index"]): aku for aku in akus}
-    legend_lines = ["\n---", "**Sources & Evidence Path:**"]
-    
-    for raw, seq in raw_to_new.items():
-        aku = aku_map.get(raw)
-        if not aku: continue
-        metadata = aku.get("metadata", {})
-        qid = metadata.get("qid") or metadata.get("article_id")
-        source_info = source_urls.get(qid) if qid else None
-        origin, method = aku.get("origin", "Unknown"), aku.get("method", "Unknown")
-        content_label = llm_evidence.get(raw) if llm_evidence else None
-        
-        line = f"- `[{seq}]` "
-        if origin == "Vector DB":
-            if not content_label:
-                snippet = aku['content'].split(": ", 1)[-1] if ": " in aku['content'] else aku['content']
-                content_label = f"{snippet[:120]}..."
-            line += f'"{content_label}"'
-            if metadata.get("chunk_id"): line += f" | ID: {metadata['chunk_id']}"
-        else:
-            if content_label: line += f"{content_label}"
-            elif metadata.get("name"): line += f"{metadata['name']}"
-            else: line += f"{aku['content'][:120]}..."
-        
-        if source_info:
-            name, url = source_info.get("name", "Source"), source_info.get("wikipedia_url")
-            if url: line += f" ([{name}]({url}))"
-        
-        line += f" | Origin: {origin} | Method: {method}"
-        legend_lines.append(line)
-
-    return updated_answer, "\n".join(legend_lines)
-
-
-def _check_faithfulness(answer: str, akus: list[dict]) -> dict[str, Any]:
-    """Heuristic check for attribution density."""
-    citations = re.findall(r"\[(\d+)\]", answer)
-    if len(answer) > 200 and len(citations) < (len(answer) / 200):
-        return {"is_faithful": False, "issue": "Low citation density"}
-    valid_indices = {str(aku["index"]) for aku in akus}
-    hallucinated = set(citations) - valid_indices
-    if hallucinated: return {"is_faithful": False, "issue": f"Hallucinated indices: {hallucinated}"}
-    return {"is_faithful": True, "issue": None}
-
-
 async def synthesize_answer(state: State, config: RunnableConfig) -> dict[str, Any]:
-    """Synthesize a final answer from all retrieved context using AKUs."""
+    """Synthesize a final answer from all retrieved context using AKUs.
+    
+    Args:
+        state: Current graph state.
+        config: LangGraph runtime configuration.
+        
+    Returns:
+        dict[str, Any]: Partial state update with the final answer message.
+    """
     configuration = Configuration.from_runnable_config(config)
     client = await gemini_client.get_client()
     query_text = _get_query_text(state.messages[-1])
@@ -307,26 +281,28 @@ async def synthesize_answer(state: State, config: RunnableConfig) -> dict[str, A
     system_instruction = gemini_client.get_schema_instruction()
     prompt = SYNTHESIS_PROMPT.format(akus=_format_akus_for_prompt(akus), guide=state.retrieval_guide, query=query_text)
     
-    response_text = await asyncio.to_thread(
+    response = await asyncio.to_thread(
         gemini_generate, 
         client, 
         prompt, 
         model=configuration.model,
         response_schema=SynthesisResponse,
-        system_instruction=system_instruction
+        system_instruction=system_instruction,
+        response_mime_type="application/json",
     )
 
-    try:
-        data = json.loads(response_text)
-        answer = data.get("answer", "")
-        # Convert List[EvidenceItem] to Dict[index, content] for compatibility
-        evidence_list = data.get("evidence", [])
+    if isinstance(response, SynthesisResponse):
+        answer = response.answer
+        evidence = {str(item.index): item.content for item in response.evidence}
+    elif isinstance(response, dict):
+        answer = response.get("answer", "")
+        evidence_list = response.get("evidence", [])
         evidence = {str(item.get("index")): item.get("content") for item in evidence_list if isinstance(item, dict)}
-    except Exception:
-        answer, evidence = response_text, {}
+    else:
+        answer, evidence = str(response), {}
 
-    faithfulness = _check_faithfulness(answer, akus)
-    updated_answer, legend = _resolve_aku_legend(answer, akus, state.source_urls, llm_evidence=evidence)
+    _ = check_faithfulness(answer, akus) # Result logged or used if needed
+    updated_answer, legend = resolve_aku_legend(answer, akus, state.source_urls, llm_evidence=evidence)
     final_answer = updated_answer + legend
     logger.info("synthesize_answer_done", length=len(final_answer), aku_count=len(akus))
     return {"messages": [AIMessage(content=final_answer)], "akus": akus}
