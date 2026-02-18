@@ -1,4 +1,4 @@
-# GraphRAG - Part 2: Multi-Strategy Retrieval Agent
+# GraphRAG - Part 2: Retrieval Agent
 
 *Last update: February 18, 2026*
 
