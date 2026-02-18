@@ -1,11 +1,11 @@
 # GraphRAG Agent about Electronic Music
 
-Ask a question and the agent will retrieve context from the knowledge graph, vector store snd Communities to generate an answer.
-Your questions can be very specific about a person, band, instrument, genre, song album, record label, event city, country, etc. related to electronic music or sub-genres.
+Ask a question and the agent will retrieve context from the knowledge graph, vector store and Communities to generate an answer.
+Your questions can be very specific about a person, band, instrument, genre, song album, record label, event city, country, etc. in the domain of electronic music or sub-genres.
 
 ## Examples:
 
-### Complexity level:1
+### Complexity level:1 (Zoom In questions)
 - where is Kraftwerk from?
 - from which country and continent is Depeche Mode?
 - who is Gary Numan?
@@ -17,8 +17,8 @@ Your questions can be very specific about a person, band, instrument, genre, son
 - what is Afrofuturism, and who is a main representing artist?
 - What is the relationship between Depeche Mode and Vince Clarke?
 
-### Complexity level:3
+### Complexity level:3 (Zoom Out questions)
 - what was the social impact of the fall of the Berlin Wall on electronic music?
 - making a parallelism with the fall of the Berlin Wall, tell me what happened at the same time in the scene of electronic music in the UK. 
-- do you think that we can map at this moment the roots that gave origin to the chemical brothers?
+- do you think that we can map at the fall of the Berlin Wall the roots that gave origin to the Chemical Brothers?
 - what is the impact of electronic music in the 80s decade?
