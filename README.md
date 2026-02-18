@@ -197,14 +197,12 @@ langgraph dev
 
 This launches the visual debugging IDE where you can inspect state at each node, edit past states, and replay from any point in the graph.
 
-### Running with Docker
+### Running with Docker (Local)
 
 ```bash
 docker build -t graphrag-agent .
 docker run -p 8080:8080 --env-file .env graphrag-agent
 ```
-
-The Docker image uses a multi-stage build with `uv` for dependency resolution and deploys to **Google Cloud Run**.
 
 ### Running Tests
 
@@ -218,6 +216,67 @@ Integration tests (requiring live backends) are marked separately:
 uv run pytest -m integration      # Only integration tests
 uv run pytest -m "not integration" # Only unit tests
 ```
+
+## Deployment (Google Cloud Run)
+
+The agent is designed for containerized deployment on **Google Cloud Run**. The `Dockerfile` implements a **multi-stage build** that produces a lean, production-ready image.
+
+### Docker Image Architecture
+
+```
+┌─────────────────────────────────────────────────────────────────┐
+│  Stage 1: Builder (ghcr.io/astral-sh/uv:python3.13-bookworm)   │
+│  ├── Installs dependencies from uv.lock (deterministic)         │
+│  ├── Copies src/, data_volume/, app.py, chainlit config         │
+│  └── Builds the package with uv sync                            │
+├─────────────────────────────────────────────────────────────────┤
+│  Stage 2: Runtime (python:3.13-slim-bookworm)                   │
+│  ├── Installs only runtime system libs (libssl3, libcurl4)      │
+│  ├── Copies virtualenv from builder (/app/.venv)                │
+│  └── Entry point: chainlit run app.py --port ${PORT:-8080}      │
+└─────────────────────────────────────────────────────────────────┘
+```
+
+**Key characteristics:**
+- **Deterministic builds**: Dependencies are pinned via `uv.lock`, ensuring identical environments across dev, CI, and production
+- **Minimal runtime image**: Only `libssl3` and `libcurl4` are installed as system dependencies (required by `curl-cffi`)
+- **Cloud Run-native**: The container respects the `$PORT` environment variable injected by Cloud Run, defaulting to `8080`
+- **Bytecode compilation**: `UV_COMPILE_BYTECODE=1` in the builder stage pre-compiles `.pyc` files for faster cold starts
+- **Static data included**: `data_volume/assets/` (parquet lookup tables) is bundled into the image for source resolution without external file storage
+
+### Deploy to Cloud Run
+
+```bash
+# Build and push to Google Artifact Registry
+docker build -t <REGION>-docker.pkg.dev/<PROJECT_ID>/<REPO>/graphrag-agent:latest .
+docker push <REGION>-docker.pkg.dev/<PROJECT_ID>/<REPO>/graphrag-agent:latest
+
+# Deploy to Cloud Run
+gcloud run deploy graphrag-agent \
+  --image <REGION>-docker.pkg.dev/<PROJECT_ID>/<REPO>/graphrag-agent:latest \
+  --region <REGION> \
+  --platform managed \
+  --allow-unauthenticated \
+  --set-env-vars "NEO4J_URI=<uri>,NEO4J_USERNAME=<user>" \
+  --set-secrets "NEO4J_PASSWORD=neo4j-password:latest,GEMINI_API_KEY=gemini-key:latest,PINECONE_API_KEY=pinecone-key:latest,HUGGING_FACE_HUB_TOKEN=hf-token:latest"
+```
+
+Secrets should be stored in **Google Secret Manager** and mounted via `--set-secrets` rather than passed as plain environment variables.
+
+### LangGraph Studio (Development)
+
+For local development and visual debugging, the `langgraph.json` configuration enables both **LangGraph Studio** and **LangGraph Server**:
+
+```json
+{
+  "graphs": { "agent": "./src/agent/graph.py:graph" },
+  "env": ".env",
+  "python_path": ["src"],
+  "image_distro": "wolfi"
+}
+```
+
+This allows inspecting state at each node, editing past states, and replaying from any point in the graph during development.
 
 ## Example Queries
 
